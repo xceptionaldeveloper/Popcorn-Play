@@ -138,7 +138,8 @@ service cloud.firestore {
                       (isLocalUser(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password'])) ||
                       (isSignedIn() && isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password']))
                     );
-      allow delete, list: if false;
+      allow delete: if isAdmin();
+      allow list: if isAdmin();
     }
 
     // Global Brand Configuration

@@ -4723,6 +4723,7 @@ export default function AdminPanel() {
                           type="text"
                           placeholder="e.g. MD Ikhlas"
                           value={editUserName}
+                          autoComplete="new-name"
                           onChange={(e) => setEditUserName(e.target.value)}
                           className="w-full bg-[#101012] border border-white/5 focus:border-red-500 focus:outline-none rounded-xl px-3 py-2.5 text-xs text-white"
                         />
@@ -4735,6 +4736,7 @@ export default function AdminPanel() {
                           placeholder="e.g. user@popcornplay.com"
                           value={editUserEmail}
                           disabled={!!editingUserUid} // We shouldn't change uid email usually during edit
+                          autoComplete="new-email"
                           onChange={(e) => setEditUserEmail(e.target.value)}
                           className="w-full bg-[#101012] border border-white/5 focus:border-red-500 focus:outline-none rounded-xl px-3 py-2.5 text-xs text-white disabled:opacity-50 disabled:cursor-not-allowed font-mono"
                         />
@@ -4820,6 +4822,7 @@ export default function AdminPanel() {
                           await adminUpdateUserProfile(updatedUser);
 
                           // Trigger alert
+                          // Trigger alert
                           triggerAlert(editingUserUid ? "গ্রাহক প্রোফাইল সফলভাবে সংশোধন করা হয়েছে।" : "নতুন গ্রাহক হিসাব সফলভাবে তৈরি করা হয়েছে।");
 
                           // Reset states
@@ -4838,7 +4841,7 @@ export default function AdminPanel() {
                 </div>
 
                 {/* Right side: User Accounts List with Search */}
-                <div className="xl:col-span-12 lg:col-span-12 xl:col-span-7 space-y-4">
+                <div className="lg:col-span-12 xl:col-span-7 space-y-4">
                   <div className="bg-[#0b0b0e] border border-white/5 rounded-2xl p-5 space-y-4">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                       <h4 className="text-xs font-mono font-bold text-gray-400 uppercase tracking-wider">
@@ -4875,81 +4878,110 @@ export default function AdminPanel() {
                           const email = (user.email || '').toLowerCase();
                           const q = userSearchQuery.toLowerCase();
                           return name.includes(q) || email.includes(q);
-                        }).map((usr) => (
-                          <div key={usr.uid} className="flex justify-between items-center bg-black/40 border border-white/5 p-4 rounded-2xl hover:border-red-500/20 hover:bg-[#121215] transition-all">
-                            <div className="flex items-center space-x-3.5 min-w-0">
-                              <div className="w-10 h-10 bg-white/5 border border-white/10 rounded-xl flex items-center justify-center text-gray-400 relative">
-                                <Users className="w-4 h-4 text-gray-400" />
-                                {usr.isPremium && (
-                                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-yellow-500 rounded-full border border-black animate-pulse" />
-                                )}
-                              </div>
-                              <div className="truncate text-left min-w-0">
-                                <span className="text-xs font-sans font-black text-white block truncate">{usr.name}</span>
-                                <span className="text-[10px] text-gray-400 font-mono block truncate mt-0.5">{usr.email}</span>
-                                
-                                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                                  {usr.isPremium ? (
-                                    <span className="text-[9px] font-sans font-black bg-gradient-to-r from-amber-500 to-yellow-400 text-black px-2 py-0.5 rounded-full tracking-wide">
-                                      PREMIUM MEMBER
-                                    </span>
-                                  ) : (
-                                    <span className="text-[9px] font-sans font-black bg-white/5 text-gray-400 px-2 py-0.5 rounded-full tracking-wide">
-                                      FREE ACCOUNT
-                                    </span>
-                                  )}
+                        }).map((usr) => {
+                          const isUsrAdmin = (() => {
+                            const emailLower = (usr.email || '').trim().toLowerCase();
+                            const adminEmailConf = (settings?.adminEmail || 'admin@popcornplay.com').trim().toLowerCase();
+                            return emailLower === adminEmailConf || emailLower === 'admin@popcornplay.com' || emailLower === 'mdikhlas098@gmail.com';
+                          })();
 
-                                  {usr.premiumUntil && (
-                                    <span className="text-[9px] text-yellow-400 font-mono">
-                                      Expires: {new Date(usr.premiumUntil).toLocaleDateString()}
-                                    </span>
+                          return (
+                            <div key={usr.uid} className="flex justify-between items-center bg-black/40 border border-white/5 p-4 rounded-2xl hover:border-red-500/20 hover:bg-[#121215] transition-all">
+                              <div className="flex items-center space-x-3.5 min-w-0">
+                                <div className="w-10 h-10 bg-white/5 border border-white/10 rounded-xl flex items-center justify-center text-gray-400 relative">
+                                  <Users className="w-4 h-4 text-gray-400" />
+                                  {usr.isPremium && (
+                                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-yellow-500 rounded-full border border-black animate-pulse" />
                                   )}
+                                </div>
+                                <div className="truncate text-left min-w-0">
+                                  <span className="text-xs font-sans font-black text-white block truncate">{usr.name}</span>
+                                  <span className="text-[10px] text-gray-400 font-mono block truncate mt-0.5">{usr.email}</span>
                                   
-                                  <span className="text-[8.5px] text-gray-600 font-mono">
-                                    UID: {usr.uid}
-                                  </span>
+                                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                    {isUsrAdmin ? (
+                                      <span className="text-[9px] font-mono font-bold bg-red-500/10 text-red-500 border border-red-500/20 px-2 py-0.5 rounded-full tracking-wide">
+                                        🛡️ PLATFORM ADMIN
+                                      </span>
+                                    ) : usr.isPremium ? (
+                                      <span className="text-[9px] font-sans font-black bg-gradient-to-r from-amber-500 to-yellow-400 text-black px-2 py-0.5 rounded-full tracking-wide">
+                                        PREMIUM MEMBER
+                                      </span>
+                                    ) : (
+                                      <span className="text-[9px] font-sans font-black bg-white/5 text-gray-400 px-2 py-0.5 rounded-full tracking-wide">
+                                        FREE ACCOUNT
+                                      </span>
+                                    )}
+
+                                    {usr.premiumUntil && !isUsrAdmin && (
+                                      <span className="text-[9px] text-yellow-400 font-mono">
+                                        Expires: {new Date(usr.premiumUntil).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                    
+                                    <span className="text-[8.5px] text-gray-600 font-mono">
+                                      UID: {usr.uid}
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
 
-                            <div className="flex items-center space-x-2 ml-4 flex-shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingUserUid(usr.uid);
-                                  setEditUserName(usr.name);
-                                  setEditUserEmail(usr.email);
-                                  setEditUserIsPremium(!!usr.isPremium);
-                                  setEditUserPremiumDays(30); // Default placeholder
-                                }}
-                                className="p-1.5 text-gray-400 bg-white/5 hover:bg-[#161619] rounded-lg transition-all cursor-pointer"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  showConfirm("Delete Account?", `Are you sure you want to permanently delete the profile for client '${usr.name}'?`, async () => {
-                                    await deleteUserProfile(usr.uid);
-                                    triggerAlert("গ্রাহক প্রোফাইলটি চিরতরে ডিলেট করা হয়েছে।");
-                                    
-                                    // If currently editing this user, reset
-                                    if (editingUserUid === usr.uid) {
-                                      setEditingUserUid(null);
-                                      setEditUserName('');
-                                      setEditUserEmail('');
-                                      setEditUserIsPremium(false);
-                                      setEditUserPremiumDays(30);
+                              <div className="flex items-center space-x-2 ml-4 flex-shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingUserUid(usr.uid);
+                                    setEditUserName(usr.name);
+                                    setEditUserEmail(usr.email);
+                                    setEditUserIsPremium(!!usr.isPremium);
+                                    setEditUserPremiumDays(30); // Default placeholder
+                                  }}
+                                  className="p-1.5 text-gray-400 bg-white/5 hover:bg-[#161619] rounded-lg transition-all cursor-pointer"
+                                  title="Edit Profile"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    if (isUsrAdmin) {
+                                      triggerAlert("নিরাপত্তার স্বার্থে প্রধান এডমিন একাউন্টটি ডিলিট করা সম্ভব নয়।");
+                                      return;
                                     }
-                                  });
-                                }}
-                                className="p-1.5 text-red-500 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-all cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+
+                                    showConfirm("Delete Account?", `Are you sure you want to permanently delete the profile for client '${usr.name}'?`, async () => {
+                                      try {
+                                        await deleteUserProfile(usr.uid);
+                                        triggerAlert("গ্রাহক প্রোফাইলটি সফলভাবে ডিলিট করা হয়েছে।");
+                                        
+                                        // If currently editing this user, reset
+                                        if (editingUserUid === usr.uid) {
+                                          setEditingUserUid(null);
+                                          setEditUserName('');
+                                          setEditUserEmail('');
+                                          setEditUserIsPremium(false);
+                                          setEditUserPremiumDays(30);
+                                        }
+                                      } catch (err: any) {
+                                        console.error("Failed to delete user profile from Firestore:", err);
+                                        triggerAlert("ডিলিট ব্যর্থ হয়েছে: " + (err.message || String(err)));
+                                      }
+                                    });
+                                  }}
+                                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                                    isUsrAdmin 
+                                      ? 'text-gray-600 bg-white/2 cursor-not-allowed opacity-45' 
+                                      : 'text-red-500 bg-red-500/10 hover:bg-red-500/20'
+                                  }`}
+                                  disabled={isUsrAdmin}
+                                  title={isUsrAdmin ? "Admin account cannot be deleted" : "Delete Account"}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                   </div>

@@ -648,24 +648,32 @@ export async function updateAppSettings(settings: AppSettings) {
               // Also synchronize custom Firestore user profile
               try {
                 const userRef = doc(firebaseDb, 'users', currentUser.uid);
-                await setDoc(userRef, {
+                const userSnap = await getDoc(userRef);
+                let currentProfileName = currentUser.displayName || 'Popcorn Play Admin';
+                let currentProfileEmail = currentUser.email || newEmail;
+                let currentFavorites = [];
+
+                if (userSnap.exists()) {
+                  const data = userSnap.data();
+                  if (data) {
+                    currentProfileName = data.name || currentProfileName;
+                    currentProfileEmail = data.email || currentProfileEmail;
+                    currentFavorites = data.favorites || [];
+                  }
+                }
+
+                const updatedProfile = {
                   uid: currentUser.uid,
-                  name: 'Popcorn Play Admin',
-                  email: newEmail,
+                  name: currentProfileName,
+                  email: currentProfileEmail,
                   isPremium: true,
-                  favorites: [],
+                  favorites: currentFavorites,
                   password: newPassword
-                }, { merge: true });
-                
-                setLocal(`pp_user_session_${currentUser.uid}`, {
-                  uid: currentUser.uid,
-                  name: 'Popcorn Play Admin',
-                  email: newEmail,
-                  isPremium: true,
-                  favorites: [],
-                  password: newPassword
-                });
-                console.log("Admin user profile document synchronized on Firestore.");
+                };
+
+                await setDoc(userRef, updatedProfile, { merge: true });
+                setLocal(`pp_user_session_${currentUser.uid}`, updatedProfile);
+                console.log("Admin user profile document synchronized on Firestore (preserved personal details).");
               } catch (profileErr: any) {
                 console.error("Firebase Firestore user profile sync failed (non-blocking):", profileErr);
               }
@@ -1458,8 +1466,8 @@ function getAllLocalUserProfiles(): UserProfile[] {
     } else {
       const defaultUser: UserProfile = {
         uid: 'local-usr-viewerpopcorncom',
-        name: 'MD Ikhlas',
-        email: 'mdikhlas098@gmail.com',
+        name: 'Sakib Ahmed',
+        email: 'sakib.ahmed@example.com',
         isPremium: true,
         premiumUntil: Date.now() + 10 * 24 * 60 * 60 * 1000,
         favorites: []
