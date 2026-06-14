@@ -4806,13 +4806,17 @@ export default function AdminPanel() {
 
                           const targetUid = editingUserUid || ('local-usr-' + editUserEmail.toLowerCase().replace(/[^a-z0-9]/g, ''));
 
+                          // Find existing user in allUsersList to keep favorites
+                          const existingUsr = allUsersList.find(u => u.uid === targetUid);
+
                           // Construct user profile
                           const updatedUser: UserProfile = {
+                            ...existingUsr,
                             uid: targetUid,
                             name: editUserName.trim(),
                             email: editUserEmail.trim().toLowerCase(),
                             isPremium: editUserIsPremium,
-                            favorites: []
+                            favorites: existingUsr?.favorites || []
                           };
 
                           if (editUserIsPremium) {
@@ -4845,7 +4849,11 @@ export default function AdminPanel() {
                   <div className="bg-[#0b0b0e] border border-white/5 rounded-2xl p-5 space-y-4">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                       <h4 className="text-xs font-mono font-bold text-gray-400 uppercase tracking-wider">
-                        Viewer Accounts Registry ({allUsersList.length})
+                        Viewer Accounts Registry ({allUsersList.filter(user => {
+                          const emailLower = (user.email || '').trim().toLowerCase();
+                          const adminEmailConf = (settings?.adminEmail || 'admin@popcornplay.com').trim().toLowerCase();
+                          return emailLower !== adminEmailConf && emailLower !== 'admin@popcornplay.com' && emailLower !== 'mdikhlas098@gmail.com';
+                        }).length})
                       </h4>
 
                       {/* Search Bar */}
@@ -4863,6 +4871,10 @@ export default function AdminPanel() {
 
                     <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
                       {allUsersList.filter(user => {
+                        const emailLower = (user.email || '').trim().toLowerCase();
+                        const adminEmailConf = (settings?.adminEmail || 'admin@popcornplay.com').trim().toLowerCase();
+                        const isUsrAdmin = emailLower === adminEmailConf || emailLower === 'admin@popcornplay.com' || emailLower === 'mdikhlas098@gmail.com';
+                        if (isUsrAdmin) return false;
                         const name = (user.name || '').toLowerCase();
                         const email = (user.email || '').toLowerCase();
                         const q = userSearchQuery.toLowerCase();
@@ -4874,6 +4886,10 @@ export default function AdminPanel() {
                         </div>
                       ) : (
                         allUsersList.filter(user => {
+                          const emailLower = (user.email || '').trim().toLowerCase();
+                          const adminEmailConf = (settings?.adminEmail || 'admin@popcornplay.com').trim().toLowerCase();
+                          const isUsrAdmin = emailLower === adminEmailConf || emailLower === 'admin@popcornplay.com' || emailLower === 'mdikhlas098@gmail.com';
+                          if (isUsrAdmin) return false;
                           const name = (user.name || '').toLowerCase();
                           const email = (user.email || '').toLowerCase();
                           const q = userSearchQuery.toLowerCase();
