@@ -590,74 +590,93 @@ export async function updateAppSettings(settings: AppSettings) {
 
       // Sync custom admin Gmail and password with Firebase Authentication if they are the logged-in user
       if (firebaseAuth && firebaseAuth.currentUser) {
-        const currentUser = firebaseAuth.currentUser;
-        
-        const oldEmail = (oldSettings.adminEmail || 'admin@popcornplay.com').trim().toLowerCase();
-        const oldPassword = oldSettings.adminPassword || 'Ikhlas124@#';
-        const newEmail = (settings.adminEmail || 'admin@popcornplay.com').trim().toLowerCase();
-        const newPassword = settings.adminPassword || 'Ikhlas124@#';
+        try {
+          const currentUser = firebaseAuth.currentUser;
+          
+          const oldEmail = (oldSettings.adminEmail || 'admin@popcornplay.com').trim().toLowerCase();
+          const oldPassword = oldSettings.adminPassword || 'Ikhlas124@#';
+          const newEmail = (settings.adminEmail || 'admin@popcornplay.com').trim().toLowerCase();
+          const newPassword = settings.adminPassword || 'Ikhlas124@#';
 
-        const isUserAdminEmail = currentUser.email?.toLowerCase() === oldEmail || currentUser.email?.toLowerCase() === newEmail;
+          // Check if this admin is the currently logged in user
+          const isUserAdminEmail = currentUser.email?.toLowerCase() === oldEmail || currentUser.email?.toLowerCase() === newEmail;
 
-        if (isUserAdminEmail) {
-          const isEmailChanged = oldEmail !== newEmail;
-          const isPasswordChanged = oldPassword !== newPassword;
+          if (isUserAdminEmail) {
+            const isEmailChanged = oldEmail !== newEmail;
+            const isPasswordChanged = oldPassword !== newPassword;
 
-          if (isEmailChanged || isPasswordChanged) {
-            console.log("Admin credentials modified! Synchronizing with Firebase Authentication system...", { isEmailChanged, isPasswordChanged });
-            
-            // Re-authenticate user to satisfy modern browser's security/re-login prompt
-            try {
-              const credential = EmailAuthProvider.credential(currentUser.email || oldEmail, oldPassword);
-              await reauthenticateWithCredential(currentUser, credential);
-              console.log("Admin session verified for credentials modification.");
-            } catch (reauthErr) {
-              console.warn("Re-authentication with last known keys failed, trying new keys:", reauthErr);
+            if (isEmailChanged || isPasswordChanged) {
+              console.log("Admin credentials modified! Synchronizing with Firebase system...", { isEmailChanged, isPasswordChanged });
+              
+              // Only update Firebase Auth email/password if they did NOT log in via google.com provider
+              const isGoogleUser = currentUser.providerData?.some(p => p.providerId === 'google.com') || currentUser.email?.endsWith('@gmail.com');
+
+              if (!isGoogleUser) {
+                // Re-authenticate user to satisfy modern browser's security/re-login prompt
+                try {
+                  const credential = EmailAuthProvider.credential(currentUser.email || oldEmail, oldPassword);
+                  await reauthenticateWithCredential(currentUser, credential);
+                  console.log("Admin session verified for credentials modification.");
+                } catch (reauthErr) {
+                  console.warn("Re-authentication with last known keys failed, trying new keys:", reauthErr);
+                  try {
+                    const credential = EmailAuthProvider.credential(currentUser.email || newEmail, newPassword);
+                    await reauthenticateWithCredential(currentUser, credential);
+                    console.log("Admin session verified with new credentials.");
+                  } catch (reauthErr2) {
+                    console.warn("Could not satisfy re-authentication criteria:", reauthErr2);
+                  }
+                }
+
+                // Sync with Firebase Auth
+                try {
+                  if (isPasswordChanged) {
+                    await updatePassword(currentUser, newPassword);
+                    console.log("Firebase Auth password synchronized.");
+                  }
+                  if (isEmailChanged) {
+                    await updateEmail(currentUser, newEmail);
+                    console.log("Firebase Auth email synchronized.");
+                  }
+                } catch (authErr: any) {
+                  console.error("Firebase Auth email/password update failed (non-blocking):", authErr);
+                }
+              } else {
+                console.log("Logged in via Google, skipping Firebase Auth email/password updating.");
+              }
+
+              // Also synchronize custom Firestore user profile
               try {
-                const credential = EmailAuthProvider.credential(currentUser.email || newEmail, newPassword);
-                await reauthenticateWithCredential(currentUser, credential);
-                console.log("Admin session verified with new credentials.");
-              } catch (reauthErr2) {
-                console.warn("Could not satisfy re-authentication criteria, proceeding with update efforts anyway:", reauthErr2);
+                const userRef = doc(firebaseDb, 'users', currentUser.uid);
+                await setDoc(userRef, {
+                  uid: currentUser.uid,
+                  name: 'Popcorn Play Admin',
+                  email: newEmail,
+                  isPremium: true,
+                  favorites: [],
+                  password: newPassword
+                }, { merge: true });
+                
+                setLocal(`pp_user_session_${currentUser.uid}`, {
+                  uid: currentUser.uid,
+                  name: 'Popcorn Play Admin',
+                  email: newEmail,
+                  isPremium: true,
+                  favorites: [],
+                  password: newPassword
+                });
+                console.log("Admin user profile document synchronized on Firestore.");
+              } catch (profileErr: any) {
+                console.error("Firebase Firestore user profile sync failed (non-blocking):", profileErr);
               }
             }
-
-            // Sync with Firebase Auth
-            if (isPasswordChanged) {
-              await updatePassword(currentUser, newPassword);
-              console.log("Firebase Auth password synchronized.");
-            }
-            if (isEmailChanged) {
-              await updateEmail(currentUser, newEmail);
-              console.log("Firebase Auth email synchronized.");
-            }
-
-            // Also synchronize custom Firestore user profile
-            const userRef = doc(firebaseDb, 'users', currentUser.uid);
-            await setDoc(userRef, {
-              uid: currentUser.uid,
-              name: 'Popcorn Play Admin',
-              email: newEmail,
-              isPremium: true,
-              favorites: [],
-              password: newPassword
-            }, { merge: true });
-            
-            setLocal(`pp_user_session_${currentUser.uid}`, {
-              uid: currentUser.uid,
-              name: 'Popcorn Play Admin',
-              email: newEmail,
-              isPremium: true,
-              favorites: [],
-              password: newPassword
-            });
-            console.log("Admin user profile document synchronized on Firestore.");
           }
+        } catch (syncErr: any) {
+          console.warn("Non-blocking error during admin credentials sync:", syncErr);
         }
       }
     } catch (error: any) {
-      console.error("Failed synchronizing settings with Firebase Auth/Firestore:", error);
-      // Give a clean thrown error with direct feedback so the user panel can show it
+      console.error("Failed saving app_settings on Firestore:", error);
       throw new Error(error.message || "Failed to finalize admin settings updates in Firebase cloud.");
     }
   }

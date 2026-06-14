@@ -131,8 +131,8 @@ service cloud.firestore {
       allow get: if (isSignedIn() && (isOwner(userId) || isAdmin())) || isLocalUser(userId);
       allow create: if ( (isSignedIn() && isOwner(userId)) || isLocalUser(userId) ) 
                      && isValidUserProfile(incoming()) 
-                     && incoming().isPremium == false 
-                     && (!incoming().keys().hasAny(['isAdmin']) || incoming().isAdmin == false);
+                     && (incoming().isPremium == false || isAdmin()) 
+                     && (!incoming().keys().hasAny(['isAdmin']) || incoming().isAdmin == false || isAdmin());
       allow update: if isValidUserProfile(incoming()) && (
                       isAdmin() || 
                       (isLocalUser(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password'])) ||
