@@ -1,0 +1,125 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile information representing account privileges and library preferences.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "isPremium": { "type": "boolean" },
+        "favorites": { "type": "array" },
+        "isAdmin": { "type": "boolean" }
+      },
+      "required": ["uid", "name", "email", "isPremium", "favorites"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Global settings for the popcorn streaming platform.",
+      "type": "object",
+      "properties": {
+        "appName": { "type": "string" },
+        "adultPin": { "type": "string" },
+        "supportActive": { "type": "boolean" },
+        "bkash": { "type": "string" },
+        "nagad": { "type": "string" },
+        "bank": { "type": "string" }
+      },
+      "required": ["appName", "adultPin", "supportActive", "bkash", "nagad", "bank"]
+    },
+    "ContentItem": {
+      "title": "ContentItem",
+      "description": "A streamable media title in the platform catalog.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "coverUrl": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "downloadUrl": { "type": "string" },
+        "tags": { "type": "array" },
+        "category": { "type": "string" },
+        "isPremium": { "type": "boolean" },
+        "isAdult": { "type": "boolean" },
+        "schedule": { "type": "string" },
+        "description": { "type": "string" },
+        "rating": { "type": "number" },
+        "status": { "type": "string" },
+        "zipUrl": { "type": "string" },
+        "episodes": { "type": "array" }
+      },
+      "required": ["id", "title", "coverUrl", "videoUrl", "tags", "category", "isPremium", "isAdult", "schedule", "description", "rating"]
+    },
+    "PaymentRequest": {
+      "title": "PaymentRequest",
+      "description": "Invoice upgrade approval requests matching transactions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "method": { "type": "string" },
+        "senderNumber": { "type": "string" },
+        "transactionId": { "type": "string" },
+        "amount": { "type": "number" },
+        "timestamp": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "userId", "userName", "userEmail", "method", "senderNumber", "transactionId", "amount", "timestamp", "status"]
+    },
+    "NotificationItem": {
+      "title": "NotificationItem",
+      "description": "Platform global push notifications broadcast messages.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "msg": { "type": "string" },
+        "time": { "type": "string" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["id", "msg", "time"]
+    },
+    "SupportSession": {
+      "title": "SupportSession",
+      "description": "Active customer support real-time discussion chat thread.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "messages": { "type": "array" },
+        "lastUpdated": { "type": "string" },
+        "unreadCount": { "type": "number" }
+      },
+      "required": ["userId", "userName", "userEmail", "messages", "lastUpdated"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User customized profile documents."
+    },
+    "/app_settings/config": {
+      "schema": "AppSettings",
+      "description": "Global administration parameter settings."
+    },
+    "/content/{contentId}": {
+      "schema": "ContentItem",
+      "description": "Video catalog content entities."
+    },
+    "/payments/{paymentId}": {
+      "schema": "PaymentRequest",
+      "description": "Invoiced billing items logged by subscribers."
+    },
+    "/notifications/{notificationId}": {
+      "schema": "NotificationItem",
+      "description": "Alert broadcast messages."
+    },
+    "/live_support/{userId}": {
+      "schema": "SupportSession",
+      "description": "Direct communication help-desk sessions."
+    }
+  }
+}

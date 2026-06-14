@@ -1,0 +1,6 @@
+{
+  "name": "Popcorn Play",
+  "description": "Ultra-Dark Glassmorphic Streaming Platform for Movies, Anime, Drama, and Cartoons with real-time Admin CMS, User Profiles, Parental Control, and Live Chat Support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

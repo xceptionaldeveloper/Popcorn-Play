@@ -1,0 +1,188 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. GLOBAL SAFETY NET: Default catch-all deny rule
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. GLOBAL HELPERS
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Administrator Check: Bootstrapped securely using the verified user email
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "mdikhlas098@gmail.com" ||
+        request.auth.token.email == "admin@popcornplay.com" ||
+        (exists(/databases/$(database)/documents/app_settings/config) && 
+         request.auth.token.email == get(/databases/$(database)/documents/app_settings/config).data.adminEmail)
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isLocalUser(id) {
+      return id is string && id.size() >= 10 && id[0:10] == "local-usr-";
+    }
+
+    function isValidId(id) {
+       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 3. SCHEMA INTEGRITY VALIDATION BUILDERS
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'name', 'email', 'isPremium', 'favorites']) 
+          && data.keys().size() in [5, 6, 7, 8, 9, 10, 11, 12] 
+          && data.uid is string 
+          && data.name is string 
+          && data.name.size() <= 100
+          && data.email is string
+          && data.email.size() <= 100
+          && data.isPremium is bool
+          && data.favorites is list;
+    }
+
+    function isValidAppSettings(data) {
+      return data.keys().hasAll(['appName', 'adultPin', 'supportActive', 'bkash', 'nagad', 'bank'])
+          && data.appName is string
+          && data.appName.size() <= 100
+          && data.adultPin is string
+          && data.adultPin.size() <= 10
+          && data.supportActive is bool
+          && data.bkash is string
+          && data.nagad is string
+          && data.bank is string;
+    }
+
+    function isValidContentItem(data) {
+      return data.keys().hasAll(['id', 'title', 'coverUrl', 'videoUrl', 'tags', 'category', 'isPremium', 'isAdult', 'schedule', 'description', 'rating'])
+          && data.id is string
+          && data.title is string
+          && data.title.size() <= 128
+          && data.coverUrl is string
+          && data.videoUrl is string
+          && data.tags is list
+          && data.category is string
+          && data.isPremium is bool
+          && data.isAdult is bool
+          && data.schedule is string
+          && data.description is string
+          && data.rating is number;
+    }
+
+    function isValidPaymentRequest(data) {
+      return data.keys().hasAll(['id', 'userId', 'userName', 'userEmail', 'method', 'senderNumber', 'transactionId', 'amount', 'timestamp', 'status'])
+          && data.keys().size() in [10, 11, 12, 13, 14]
+          && data.id is string
+          && data.userId is string
+          && data.userName is string
+          && data.userEmail is string
+          && data.method is string
+          && data.senderNumber is string
+          && data.senderNumber.size() <= 100
+          && data.transactionId is string
+          && data.transactionId.size() <= 200
+          && data.amount is number
+          && data.timestamp is string
+          && data.status is string
+          && data.status in ['pending', 'approved', 'rejected'];
+    }
+
+    function isValidNotificationItem(data) {
+      return data.keys().hasAll(['id', 'msg', 'time'])
+          && data.keys().size() in [3, 4]
+          && data.id is string
+          && data.msg is string
+          && data.msg.size() <= 1000
+          && data.time is string;
+    }
+
+    // Support Session checking inside helper
+    function isValidSupportSession(data) {
+      return data.keys().hasAll(['messages'])
+          && (!data.keys().hasAny(['userId']) || data.userId is string)
+          && (!data.keys().hasAny(['userName']) || data.userName is string)
+          && (!data.keys().hasAny(['userEmail']) || data.userEmail is string)
+          && data.messages is list
+          && (!data.keys().hasAny(['lastUpdated']) || data.lastUpdated is string);
+    }
+
+    // 4. COLLECTION ROUTING & ACTIONS
+    
+    // User Profiles
+    match /users/{userId} {
+      allow get: if (isSignedIn() && (isOwner(userId) || isAdmin())) || isLocalUser(userId);
+      allow create: if ( (isSignedIn() && isOwner(userId)) || isLocalUser(userId) ) 
+                     && isValidUserProfile(incoming()) 
+                     && incoming().isPremium == false 
+                     && (!incoming().keys().hasAny(['isAdmin']) || incoming().isAdmin == false);
+      allow update: if isValidUserProfile(incoming()) && (
+                      isAdmin() || 
+                      (isLocalUser(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password'])) ||
+                      (isSignedIn() && isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password']))
+                    );
+      allow delete, list: if false;
+    }
+
+    // Global Brand Configuration
+    match /app_settings/{documentId} {
+      allow get, list: if true;
+      allow write: if isAdmin() && isValidAppSettings(incoming());
+    }
+
+    // Media Catalog items
+    match /content/{contentId} {
+      allow get, list: if true;
+      allow write: if isAdmin() && isValidContentItem(incoming()) && isValidId(contentId);
+    }
+
+    // Billing Subscriptions
+    match /payments/{paymentId} {
+      allow get: if (isSignedIn() && (isOwner(existing().userId) || isAdmin())) || isLocalUser(existing().userId);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid) || isLocalUser(resource.data.userId);
+      allow create: if ( (isSignedIn() && isOwner(incoming().userId)) || isLocalUser(incoming().userId) ) 
+                     && incoming().status == 'pending' 
+                     && isValidPaymentRequest(incoming()) 
+                     && isValidId(paymentId);
+      allow update: if isValidPaymentRequest(incoming()) && isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Broadcaster notifications
+    match /notifications/{notificationId} {
+      allow get, list: if true;
+      allow write: if isAdmin() && isValidNotificationItem(incoming()) && isValidId(notificationId);
+    }
+
+    // Live Support Customer Help-desks
+    match /live_support/{userId} {
+      allow get: if (isSignedIn() && (isOwner(userId) || isAdmin())) || isLocalUser(userId);
+      allow list: if isAdmin();
+      allow create: if ( (isSignedIn() && isOwner(userId)) || isLocalUser(userId) ) && isValidSupportSession(incoming()) && isValidId(userId);
+      allow update: if isValidSupportSession(incoming()) && (
+                      isAdmin() ||
+                      (isLocalUser(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['messages', 'lastUpdated', 'unreadCount'])) ||
+                      (isSignedIn() && isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['messages', 'lastUpdated', 'unreadCount']))
+                    );
+      allow delete: if false;
+    }
+
+  }
+}
