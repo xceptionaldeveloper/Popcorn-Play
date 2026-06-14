@@ -5,7 +5,7 @@
  */
 
 import { initializeApp, getApp, getApps } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, signOut as firebaseSignOut, onAuthStateChanged, User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
+import { getAuth, signInWithPopup, GoogleAuthProvider, signOut as firebaseSignOut, onAuthStateChanged, User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateEmail, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc, getDocs, query, orderBy, limit, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { ContentItem, NotificationItem, SupportSession, PaymentRequest, AppSettings, VisitorStat, UserProfile, ChatMessage, PremiumPlan, BannerItem } from '../types';
@@ -540,7 +540,9 @@ export function subscribeAppSettings(callback: (settings: AppSettings) => void) 
     const docPath = 'app_settings/config';
     return onSnapshot(doc(firebaseDb, 'app_settings', 'config'), (docSnap) => {
       if (docSnap.exists()) {
-        callback(docSnap.data() as AppSettings);
+        const configData = docSnap.data() as AppSettings;
+        setLocal('pp_settings', configData);
+        callback(configData);
       } else {
         const isAdminUser = firebaseAuth?.currentUser?.email && (
           firebaseAuth.currentUser.email === 'mdikhlas098@gmail.com' ||
@@ -578,12 +580,85 @@ export function subscribeAppSettings(callback: (settings: AppSettings) => void) 
 }
 
 export async function updateAppSettings(settings: AppSettings) {
+  const oldSettings = getLocal('pp_settings', DEFAULT_SETTINGS) as AppSettings;
   setLocal('pp_settings', settings);
+  
   if (IS_FIREBASE_REAL && firebaseDb) {
     try {
       await setDoc(doc(firebaseDb, 'app_settings', 'config'), settings);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'app_settings/config');
+      console.log("Firestore app_settings/config saved successfully.");
+
+      // Sync custom admin Gmail and password with Firebase Authentication if they are the logged-in user
+      if (firebaseAuth && firebaseAuth.currentUser) {
+        const currentUser = firebaseAuth.currentUser;
+        
+        const oldEmail = (oldSettings.adminEmail || 'admin@popcornplay.com').trim().toLowerCase();
+        const oldPassword = oldSettings.adminPassword || 'Ikhlas124@#';
+        const newEmail = (settings.adminEmail || 'admin@popcornplay.com').trim().toLowerCase();
+        const newPassword = settings.adminPassword || 'Ikhlas124@#';
+
+        const isUserAdminEmail = currentUser.email?.toLowerCase() === oldEmail || currentUser.email?.toLowerCase() === newEmail;
+
+        if (isUserAdminEmail) {
+          const isEmailChanged = oldEmail !== newEmail;
+          const isPasswordChanged = oldPassword !== newPassword;
+
+          if (isEmailChanged || isPasswordChanged) {
+            console.log("Admin credentials modified! Synchronizing with Firebase Authentication system...", { isEmailChanged, isPasswordChanged });
+            
+            // Re-authenticate user to satisfy modern browser's security/re-login prompt
+            try {
+              const credential = EmailAuthProvider.credential(currentUser.email || oldEmail, oldPassword);
+              await reauthenticateWithCredential(currentUser, credential);
+              console.log("Admin session verified for credentials modification.");
+            } catch (reauthErr) {
+              console.warn("Re-authentication with last known keys failed, trying new keys:", reauthErr);
+              try {
+                const credential = EmailAuthProvider.credential(currentUser.email || newEmail, newPassword);
+                await reauthenticateWithCredential(currentUser, credential);
+                console.log("Admin session verified with new credentials.");
+              } catch (reauthErr2) {
+                console.warn("Could not satisfy re-authentication criteria, proceeding with update efforts anyway:", reauthErr2);
+              }
+            }
+
+            // Sync with Firebase Auth
+            if (isPasswordChanged) {
+              await updatePassword(currentUser, newPassword);
+              console.log("Firebase Auth password synchronized.");
+            }
+            if (isEmailChanged) {
+              await updateEmail(currentUser, newEmail);
+              console.log("Firebase Auth email synchronized.");
+            }
+
+            // Also synchronize custom Firestore user profile
+            const userRef = doc(firebaseDb, 'users', currentUser.uid);
+            await setDoc(userRef, {
+              uid: currentUser.uid,
+              name: 'Popcorn Play Admin',
+              email: newEmail,
+              isPremium: true,
+              favorites: [],
+              password: newPassword
+            }, { merge: true });
+            
+            setLocal(`pp_user_session_${currentUser.uid}`, {
+              uid: currentUser.uid,
+              name: 'Popcorn Play Admin',
+              email: newEmail,
+              isPremium: true,
+              favorites: [],
+              password: newPassword
+            });
+            console.log("Admin user profile document synchronized on Firestore.");
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error("Failed synchronizing settings with Firebase Auth/Firestore:", error);
+      // Give a clean thrown error with direct feedback so the user panel can show it
+      throw new Error(error.message || "Failed to finalize admin settings updates in Firebase cloud.");
     }
   }
   // Dispatch dynamic storage event to trigger simulation callbacks instantly
@@ -628,6 +703,7 @@ export function subscribeContent(callback: (items: ContentItem[]) => void) {
         }
         callback(sortContent(getLocal('pp_content', DEFAULT_CONTENT)));
       } else {
+        setLocal('pp_content', list);
         callback(sortContent(list));
       }
     }, (err) => {

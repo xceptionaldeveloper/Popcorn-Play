@@ -3520,11 +3520,23 @@ export default function AdminPanel() {
                 {/* Save button for general parameters */}
                 <div className="border-t border-white/5 pt-6 mt-4">
                   <button
-                    onClick={async () => {
-                      await updateAppSettings(settings);
-                      triggerAlert("Platform security & parameters successfully updated.");
+                    onClick={async (e) => {
+                      const button = e.currentTarget;
+                      const originalText = button.innerHTML;
+                      try {
+                        button.disabled = true;
+                        button.innerHTML = "<span class='animate-pulse'>Saving & Synchronizing Credentials...</span>";
+                        await updateAppSettings(settings);
+                        triggerAlert("Platform settings & Admin credentials (Email/Password) successfully synchronized in current DB and authentication system!");
+                      } catch (err: any) {
+                        console.error(err);
+                        triggerAlert("⚠️ Credentials Sync Error: " + (err.message || String(err)));
+                      } finally {
+                        button.disabled = false;
+                        button.innerHTML = originalText;
+                      }
                     }}
-                    className="w-full bg-red-650 hover:bg-red-600 font-mono font-bold text-xs py-3.5 rounded-xl uppercase tracking-wider text-white"
+                    className="w-full bg-red-650 hover:bg-red-600 font-mono font-bold text-xs py-3.5 rounded-xl uppercase tracking-wider text-white disabled:opacity-50 cursor-pointer transition-all"
                   >
                     SAVE ALL DYNAMIC PARAMETERS
                   </button>
