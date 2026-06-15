@@ -333,6 +333,20 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     }
   }, [userProfile?.uid]);
 
+  // Synchronously defaults the active payment method on modal mount
+  useEffect(() => {
+    if (paymentContent) {
+      const methods = settings?.paymentMethods || [
+        { id: '1', name: 'bKash Personal' },
+        { id: '2', name: 'Nagad Merchant' },
+        { id: '3', name: 'Dutch-Bangla Bank' }
+      ];
+      if (methods.length > 0) {
+        setPaymentMethod(methods[0].name.toLowerCase());
+      }
+    }
+  }, [paymentContent, settings]);
+
   const triggerAlert = (msg: string) => {
     setAlertMsg(msg);
     setTimeout(() => setAlertMsg(null), 4000);
@@ -1799,7 +1813,30 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
               <X className="w-5 h-5" />
             </button>
 
-            {paymentSubmitted ? (
+            {!userProfile ? (
+              <div className="text-center py-8 space-y-4">
+                <div className="w-14 h-14 rounded-full bg-yellow-500/10 flex items-center justify-center text-yellow-500 mx-auto border border-yellow-500/20">
+                  <User className="w-7 h-7" />
+                </div>
+                <h3 className="font-display font-black text-xl text-white tracking-wider">LOGIN REQUIRED</h3>
+                <p className="text-xs text-gray-400 font-sans leading-relaxed px-4">
+                  পেমেন্ট সাবমিট এবং ভিআইপি প্রিমিয়াম অ্যাকাউন্ট অ্যাক্টিভেট করার আগে আপনাকে অবশ্যই অ্যাকাউন্টে সাইন-ইন বা সাইন-আপ করতে হবে।
+                </p>
+                <div className="pt-4 px-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentContent(null);
+                      setActiveTab('profile');
+                      triggerAlert("Please login or register first! (অনুগ্ৰহ করে লগইন বা রেজিস্ট্রেশন করুন!)");
+                    }}
+                    className="w-full bg-yellow-500 hover:bg-yellow-400 text-black py-4 rounded-xl text-xs font-mono font-black uppercase tracking-wider shadow-lg active:scale-95 transition-all"
+                  >
+                    Go to Login / Sign Up
+                  </button>
+                </div>
+              </div>
+            ) : paymentSubmitted ? (
               <div className="text-center py-12 space-y-4">
                 <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500 mx-auto animate-bounce border border-emerald-500/20">
                   <Check className="w-8 h-8" />
