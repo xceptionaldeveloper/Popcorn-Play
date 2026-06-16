@@ -15,7 +15,7 @@ import {
   subscribeContent, saveContentItem, deleteContentItem, 
   subscribeAppSettings, updateAppSettings, subscribePayments, 
   updatePaymentRequestStatus, subscribeAllChatsForAdmin, sendMessage, 
-  clearChatSession, getVisitorStats, saveVisitorStats, sendNotification,
+  clearChatSession, deleteChatSession, hideChatFromAdmin, restoreChatFromAdmin, getVisitorStats, saveVisitorStats, sendNotification,
   deletePaymentRequestByAdmin, modifyPaymentRequestByAdmin, signInWithGoogle,
   deleteNotificationItem, updateNotificationItem, subscribeNotifications,
   IS_FIREBASE_REAL,
@@ -25,6 +25,9 @@ import {
 
 export default function AdminPanel() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'movies' | 'series' | 'support' | 'financials' | 'settings' | 'categories' | 'popups' | 'banners' | 'notifications' | 'socials' | 'users'>('dashboard');
+  const [supportSubTab, setSupportSubTab] = useState<'chat' | 'management'>('chat');
+  const [supportSearchQuery, setSupportSearchQuery] = useState('');
+  const [supportFilterType, setSupportFilterType] = useState<'all' | 'active' | 'hidden'>('active');
   
   // Admin Login and Custom settings states
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
@@ -199,6 +202,7 @@ export default function AdminPanel() {
   const [newBannerContentId, setNewBannerContentId] = useState('');
   const [newBannerLink, setNewBannerLink] = useState('');
   const [newBannerIsActive, setNewBannerIsActive] = useState(true);
+  const [newBannerExpirationDays, setNewBannerExpirationDays] = useState('');
   const [editingBannerId, setEditingBannerId] = useState<string | null>(null);
 
   // Custom pop-ups management states
@@ -231,6 +235,10 @@ export default function AdminPanel() {
   const [editUserEmail, setEditUserEmail] = useState('');
   const [editUserIsPremium, setEditUserIsPremium] = useState(false);
   const [editUserPremiumDays, setEditUserPremiumDays] = useState(30);
+
+  // Modern VIP subscription moderation states
+  const [ledgerFilter, setLedgerFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [ledgerSearch, setLedgerSearch] = useState('');
 
   useEffect(() => {
     // Subscriptions
@@ -1338,7 +1346,7 @@ export default function AdminPanel() {
                 <MessageSquare className="w-4 h-4" />
                 <span>Live Chat Support</span>
               </div>
-              {chatSessions.some(c => (c.unreadCount || 0) > 0) && (
+              {chatSessions.some(c => !c.deletedByAdmin && (c.unreadCount || 0) > 0) && (
                 <span className="w-2.5 h-2.5 rounded-full bg-green-500 shadow-md"></span>
               )}
             </button>
@@ -2547,153 +2555,440 @@ export default function AdminPanel() {
 
         {/* 4. CHAT SUPPORT */}
         {activeTab === 'support' && (
-          <div className="grid grid-cols-12 gap-6 glass p-2 rounded-3xl min-h-[500px]">
+          <div className="space-y-6">
             
-            {/* Thread User lists */}
-            <div className="col-span-12 md:col-span-4 border-r border-white/5 p-4 space-y-4">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-mono font-bold text-gray-400 uppercase tracking-wider">Active Call logs</span>
-                <div className="flex items-center space-x-2">
-                  <span className="text-[10px] text-gray-500 font-mono">SUPPORT WORK:</span>
-                  <button
-                    onClick={async () => {
-                      if (!settings) return;
-                      const next = { ...settings, supportActive: !settings.supportActive };
-                      setSettings(next);
-                      await updateAppSettings(next);
-                      triggerAlert(`Support status toggled: ${next.supportActive ? 'ONLINE' : 'HIDDEN/OFFLINE'}`);
-                    }}
-                    className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold transition-all ${
-                      settings?.supportActive ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                    }`}
-                  >
-                    {settings?.supportActive ? 'ONLINE / SHOWN' : 'HIDDEN / AUTO'}
-                  </button>
-                </div>
-              </div>
-
-              {chatSessions.length === 0 ? (
-                <div className="text-center py-10 opacity-60">
-                  <MessageSquare className="w-8 h-8 text-gray-600 mx-auto mb-2" />
-                  <p className="text-xs text-gray-500">No active support conversations logged.</p>
-                </div>
-              ) : (
-                <div className="space-y-1.5 max-h-[450px] overflow-y-auto pr-1 no-scrollbar">
-                  {chatSessions.map((session) => (
-                    <button
-                      key={session.userId}
-                      onClick={() => {
-                        setActiveChatId(session.userId);
-                        // Clean unread count locally instantly
-                        if (session.unreadCount) session.unreadCount = 0;
-                      }}
-                      className={`w-full text-left p-3.5 rounded-2xl transition-all border flex justify-between items-center ${
-                        activeChatId === session.userId 
-                          ? 'bg-red-600/10 border-red-500/30' 
-                          : 'bg-white/[0.01] border-transparent hover:bg-white/[0.02]'
-                      }`}
-                    >
-                      <div className="truncate flex-1 pr-3">
-                        <h4 className="font-display font-medium text-xs text-white leading-tight truncate">{session.userName}</h4>
-                        <span className="text-[10px] text-gray-500 font-mono block truncate">{session.userEmail}</span>
-                        <p className="text-[11px] text-gray-400 font-mono truncate mt-1">
-                          {session.messages?.[session.messages.length - 1]?.text || 'No messages'}
-                        </p>
-                      </div>
-                      <div className="flex flex-col items-end justify-between self-stretch">
-                        <span className="text-[9px] text-gray-500 font-mono">{session.lastUpdated}</span>
-                        {(session.unreadCount || 0) > 0 && (
-                          <span className="w-4 h-4 bg-green-500 text-white rounded-full text-[9px] font-bold flex items-center justify-center shadow-lg animate-bounce">
-                            {session.unreadCount}
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
+            {/* Horizontal Mini-Navigation Tabs inside Support */}
+            <div className="flex border-b border-white/5 pb-px mb-2 space-x-1">
+              <button
+                onClick={() => setSupportSubTab('chat')}
+                className={`flex items-center space-x-2 px-6 py-4 text-xs font-mono font-bold tracking-wider uppercase transition-all border-b-2 hover:bg-white/[0.02] cursor-pointer ${
+                  supportSubTab === 'chat'
+                    ? 'border-red-500 text-red-500 bg-red-600/[0.02]'
+                    : 'border-transparent text-gray-400 hover:text-white'
+                }`}
+              >
+                <MessageSquare className="w-4 h-4 text-red-500" />
+                <span>💬 Conversations ({chatSessions.filter(c => !c.deletedByAdmin).length})</span>
+              </button>
+              
+              <button
+                onClick={() => setSupportSubTab('management')}
+                className={`flex items-center space-x-2 px-6 py-4 text-xs font-mono font-bold tracking-wider uppercase transition-all border-b-2 hover:bg-white/[0.02] cursor-pointer ${
+                  supportSubTab === 'management'
+                    ? 'border-red-500 text-red-550 bg-red-650/[0.02]'
+                    : 'border-transparent text-gray-400 hover:text-white'
+                }`}
+              >
+                <Settings className="w-4 h-4 text-amber-500" />
+                <span>⚙️ Settings & Management ({chatSessions.length})</span>
+              </button>
             </div>
 
-            {/* Chat viewport */}
-            <div className="col-span-12 md:col-span-8 flex flex-col justify-between p-4 min-h-[450px]">
-              {activeChatId && currentChatSession ? (
-                <>
-                  {/* Chat header */}
-                  <div className="flex justify-between items-center pb-3 border-b border-white/5 mb-4">
-                    <div>
-                      <h4 className="font-display font-extrabold text-sm text-white">{currentChatSession.userName}</h4>
-                      <span className="text-[10px] text-gray-500 font-mono">{currentChatSession.userEmail}</span>
-                    </div>
+            {supportSubTab === 'chat' ? (
+              <div className="grid grid-cols-12 gap-6 glass p-2 rounded-3xl min-h-[500px]">
+                
+                {/* Thread User lists */}
+                <div className="col-span-12 md:col-span-4 border-r border-white/5 p-4 space-y-4">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-mono font-bold text-gray-400 uppercase tracking-wider">Active Call logs</span>
                     <div className="flex items-center space-x-2">
+                      <span className="text-[10px] text-gray-500 font-mono">APP DESK:</span>
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold ${
+                        settings?.supportActive ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+                      }`}>
+                        {settings?.supportActive ? 'ONLINE' : 'OFFLINE'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {chatSessions.filter(c => !c.deletedByAdmin).length === 0 ? (
+                    <div className="text-center py-10 opacity-60">
+                      <MessageSquare className="w-8 h-8 text-gray-600 mx-auto mb-2" />
+                      <p className="text-xs text-gray-500">No active support conversations logged.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-[450px] overflow-y-auto pr-1 no-scrollbar">
+                      {chatSessions.filter(c => !c.deletedByAdmin).map((session) => (
+                        <div
+                          key={session.userId}
+                          className={`w-full p-3.5 bg-white/[0.01] rounded-2xl border transition-all flex items-center justify-between ${
+                            activeChatId === session.userId 
+                              ? 'bg-red-600/10 border-red-500/30' 
+                              : 'border-transparent hover:bg-white/[0.02]'
+                          }`}
+                        >
+                          <button
+                            onClick={() => {
+                              setActiveChatId(session.userId);
+                              if (session.unreadCount) session.unreadCount = 0;
+                            }}
+                            className="flex-grow text-left truncate mr-2 cursor-pointer bg-transparent border-none outline-none w-full"
+                          >
+                            <h4 className="font-display font-medium text-xs text-white leading-tight truncate">{session.userName}</h4>
+                            <span className="text-[10px] text-gray-500 font-mono block truncate">{session.userEmail}</span>
+                            <p className="text-[11px] text-gray-400 font-mono truncate mt-1">
+                              {session.messages?.[session.messages.length - 1]?.text || 'No messages'}
+                            </p>
+                          </button>
+                          <div className="flex flex-col items-end justify-between self-stretch space-y-1.5 shrink-0 text-right">
+                            <span className="text-[9px] text-gray-500 font-mono">{session.lastUpdated}</span>
+                            {(session.unreadCount || 0) > 0 && (
+                              <span className="w-4 h-4 bg-green-500 text-white rounded-full text-[9px] font-bold flex items-center justify-center shadow-lg animate-bounce">
+                                {session.unreadCount}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Chat viewport */}
+                <div className="col-span-12 md:col-span-8 flex flex-col justify-between p-4 min-h-[450px]">
+                  {activeChatId && currentChatSession ? (
+                    <>
+                      {/* Chat header */}
+                      <div className="flex justify-between items-center pb-3 border-b border-white/5 mb-4">
+                        <div>
+                          <span className="text-[9px] font-mono text-gray-500 font-bold tracking-widest uppercase">Currently Interacting with</span>
+                          <h4 className="font-display font-extrabold text-sm text-white">{currentChatSession.userName}</h4>
+                          <span className="text-[10px] text-gray-500 font-mono block">{currentChatSession.userEmail}</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs text-gray-400 font-mono mr-2 hidden sm:inline">
+                            📝 {currentChatSession.messages?.length || 0} messages
+                          </span>
+                          <button
+                            onClick={() => {
+                              setSupportSubTab('management');
+                              setSupportSearchQuery(currentChatSession.userEmail || currentChatSession.userName);
+                              setSupportFilterType('all');
+                              triggerAlert("Jumped to support desk panel settings.");
+                            }}
+                            className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/15 px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all cursor-pointer flex items-center space-x-1.5"
+                          >
+                            <span>⚙️ Manage Thread</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Messages list */}
+                      <div className="flex-grow overflow-y-auto space-y-3.5 pr-2 no-scrollbar max-h-[350px]">
+                        {(!currentChatSession.messages || currentChatSession.messages.length === 0) ? (
+                          <div className="text-center py-20 text-gray-600 font-mono text-xs">
+                            No messages. Begin typing below.
+                          </div>
+                        ) : (
+                          currentChatSession.messages.map((m) => (
+                            <div 
+                              key={m.id} 
+                              className={`flex flex-col ${m.sender === 'admin' ? 'items-end' : 'items-start'}`}
+                            >
+                              <div className={`p-4 rounded-xl text-xs max-w-sm ${
+                                m.sender === 'admin' 
+                                  ? 'bg-red-600/20 text-white rounded-tr-none border border-red-500/10' 
+                                  : 'bg-white/[0.04] text-gray-200 rounded-tl-none border border-white/5'
+                              }`}>
+                                <p>{m.text}</p>
+                              </div>
+                              <span className="text-[9px] text-gray-500 font-mono mt-1 px-1.5">{m.timestamp}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      {/* Send bar */}
+                      <div className="mt-4 pt-3 border-t border-white/5 flex items-center space-x-2">
+                        <input
+                          type="text"
+                          placeholder="Type your official support response..."
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSendReply()}
+                          className="flex-grow bg-[#101012] border border-white/5 focus:border-red-500 focus:outline-none rounded-xl px-4 py-3.5 text-xs text-white"
+                        />
+                        <button
+                          onClick={handleSendReply}
+                          className="bg-red-650 hover:bg-red-600 text-white px-5 py-3.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer"
+                        >
+                          REPLY
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex-1 flex flex-col items-center justify-center p-12 opacity-60">
+                      <MessageSquare className="w-12 h-12 text-gray-700 mb-2 animate-pulse" />
+                      <p className="text-xs text-gray-500 font-mono font-bold tracking-widest uppercase">Awaiting Thread Selection</p>
+                      <p className="text-[11px] text-gray-500 max-w-xs text-center mt-1">Select an active user chat from the sidebar panel to respond to queries in real-time.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              // ----------------- SUPPORT MANAGEMENT TAB CONTENT -----------------
+              <div className="glass p-6 rounded-3xl space-y-6">
+                
+                {/* Global Status & Stats row */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pb-6 border-b border-white/5">
+                  <div className="bg-white/[0.01] border border-white/5 p-4 rounded-2xl flex flex-col justify-between">
+                    <span className="text-xs text-gray-400 font-mono">SUPPORT WORK DESK</span>
+                    <div className="flex items-center justify-between mt-2">
+                      <span className={`text-sm font-bold font-mono ${settings?.supportActive ? 'text-green-400' : 'text-red-400'}`}>
+                        {settings?.supportActive ? '🟢 PUBLIC LIVE DESK' : '🔴 OFFLINE / AUTO'}
+                      </span>
                       <button
-                        onClick={() => {
-                          showConfirm(
-                            "Clear Chat History",
-                            "Permanently clear and reset chat log with this user?",
-                            async () => {
-                              await clearChatSession(activeChatId);
-                              triggerAlert("Chat history cleared on database.");
-                            }
-                          );
+                        onClick={async () => {
+                          if (!settings) return;
+                          const next = { ...settings, supportActive: !settings.supportActive };
+                          setSettings(next);
+                          await updateAppSettings(next);
+                          triggerAlert(`Support helpdesk status is now: ${next.supportActive ? 'ONLINE' : 'OFFLINE'}`);
                         }}
-                        className="bg-white/5 hover:bg-red-650/40 hover:text-red-400 text-gray-400 px-3 py-1.5 rounded-lg text-xs font-mono transition-all"
+                        className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all border cursor-pointer ${
+                          settings?.supportActive 
+                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20' 
+                            : 'bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/20'
+                        }`}
                       >
-                        Clear Chat Log
+                        TOGGLE
                       </button>
                     </div>
                   </div>
 
-                  {/* Messages list */}
-                  <div className="flex-1 overflow-y-auto space-y-3.5 pr-2 no-scrollbar max-h-[350px]">
-                    {(!currentChatSession.messages || currentChatSession.messages.length === 0) ? (
-                      <div className="text-center py-20 text-gray-600 font-mono text-xs">
-                        No messages. Begin typing below.
-                      </div>
-                    ) : (
-                      currentChatSession.messages.map((m) => (
-                        <div 
-                          key={m.id} 
-                          className={`flex flex-col ${m.sender === 'admin' ? 'items-end' : 'items-start'}`}
-                        >
-                          <div className={`p-4 rounded-xl text-xs max-w-sm ${
-                            m.sender === 'admin' 
-                              ? 'bg-red-600/20 text-white rounded-tr-none border border-red-500/10' 
-                              : 'bg-white/[0.04] text-gray-200 rounded-tl-none border border-white/5'
-                          }`}>
-                            <p>{m.text}</p>
-                          </div>
-                          <span className="text-[9px] text-gray-500 font-mono mt-1 px-1.5">{m.timestamp}</span>
-                        </div>
-                      ))
-                    )}
+                  <div className="bg-white/[0.01] border border-white/5 p-4 rounded-2xl">
+                    <span className="text-xs text-gray-400 font-mono">TOTAL CHAT THREADS</span>
+                    <h3 className="text-2xl font-display font-black text-white mt-1">{chatSessions.length}</h3>
                   </div>
 
-                  {/* Send bar */}
-                  <div className="mt-4 pt-3 border-t border-white/5 flex items-center space-x-2">
+                  <div className="bg-white/[0.01] border border-white/5 p-4 rounded-2xl">
+                    <span className="text-xs text-gray-400 font-mono">ACTIVE SESSIONS</span>
+                    <h3 className="text-2xl font-display font-black text-green-400 mt-1">
+                      {chatSessions.filter(c => !c.deletedByAdmin).length}
+                    </h3>
+                  </div>
+
+                  <div className="bg-white/[0.01] border border-white/5 p-4 rounded-2xl">
+                    <span className="text-xs text-gray-400 font-mono">HIDDEN / ARCHIVED</span>
+                    <h3 className="text-2xl font-display font-black text-amber-500 mt-1">
+                      {chatSessions.filter(c => c.deletedByAdmin).length}
+                    </h3>
+                  </div>
+                </div>
+
+                {/* Filter and Search Bar */}
+                <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white/[0.01] p-3 rounded-2xl border border-white/5">
+                  <div className="flex-1 w-full relative">
+                    <Search className="w-4 h-4 text-gray-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
-                      placeholder="Type your official support response..."
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSendReply()}
-                      className="flex-1 bg-[#101012] border border-white/5 focus:border-red-500 focus:outline-none rounded-xl px-4 py-3.5 text-xs text-white"
+                      placeholder="Search support threads by name, email or uid..."
+                      value={supportSearchQuery}
+                      onChange={(e) => setSupportSearchQuery(e.target.value)}
+                      className="w-full bg-[#0d0d10] border border-white/5 focus:border-red-500 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none font-mono"
                     />
-                    <button
-                      onClick={handleSendReply}
-                      className="bg-red-650 hover:bg-red-600 text-white px-5 py-3.5 rounded-xl font-mono text-xs font-bold"
-                    >
-                      REPLY
-                    </button>
                   </div>
-                </>
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center p-12 opacity-60">
-                  <MessageSquare className="w-12 h-12 text-gray-700 mb-2 animate-pulse" />
-                  <p className="text-xs text-gray-500 font-mono font-bold tracking-widest uppercase">Awaiting Thread Selection</p>
-                  <p className="text-[11px] text-gray-500 max-w-xs text-center mt-1">Select an active user chat from the sidebar panel to respond to queries in real-time.</p>
+
+                  <div className="flex items-center space-x-2 w-full md:w-auto shrink-0 justify-end">
+                    <span className="text-xs text-gray-500 font-mono">Filter:</span>
+                    <div className="flex bg-black/40 border border-white/5 rounded-xl p-1 shrink-0">
+                      {(['all', 'active', 'hidden'] as const).map((type) => (
+                        <button
+                          key={type}
+                          onClick={() => setSupportFilterType(type)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold uppercase transition-all cursor-pointer ${
+                            supportFilterType === type 
+                              ? 'bg-red-600/20 text-red-400' 
+                              : 'text-gray-450 hover:text-white'
+                          }`}
+                        >
+                          {type}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              )}
-            </div>
+
+                {/* Database Table of Sessions */}
+                <div className="overflow-x-auto rounded-2xl border border-white/5 bg-black/20">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-white/5 bg-white/[0.01] text-xs font-mono text-gray-400 uppercase tracking-wider">
+                        <th className="p-4 font-mono font-extrabold">Identity / Subscriber info</th>
+                        <th className="p-4 font-mono font-extrabold">Status & Message Details</th>
+                        <th className="p-4 font-mono font-extrabold">Last Activity</th>
+                        <th className="p-4 text-center font-mono font-extrabold">Admin operations</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5 text-xs">
+                      {(() => {
+                        const filtered = chatSessions.filter(c => {
+                          const matchSearch = 
+                            (c.userName || '').toLowerCase().includes(supportSearchQuery.toLowerCase()) ||
+                            (c.userEmail || '').toLowerCase().includes(supportSearchQuery.toLowerCase()) ||
+                            (c.userId || '').toLowerCase().includes(supportSearchQuery.toLowerCase());
+                          
+                          if (!matchSearch) return false;
+
+                          if (supportFilterType === 'active') return !c.deletedByAdmin;
+                          if (supportFilterType === 'hidden') return !!c.deletedByAdmin;
+                          return true;
+                        });
+
+                        if (filtered.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan={4} className="text-center py-12 text-gray-550 font-mono">
+                                No support sessions matching the selected filter query criteria.
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        return filtered.map((session) => (
+                          <tr key={session.userId} className="hover:bg-white/[0.01] transition-all">
+                            <td className="p-4">
+                              <div className="font-display font-bold text-white text-sm">{session.userName}</div>
+                              <div className="text-gray-400 font-mono text-[11px] mt-0.5">{session.userEmail}</div>
+                              <div className="text-gray-600 font-mono text-[9px] mt-1 select-all">UID: {session.userId}</div>
+                            </td>
+                            <td className="p-4">
+                              <div className="flex flex-col gap-1.5">
+                                <div className="flex items-center gap-2">
+                                  {session.deletedByAdmin ? (
+                                    <span className="bg-amber-500/10 text-amber-500 text-[10px] font-mono px-2 py-0.5 rounded-md font-bold">
+                                      🚫 HIDDEN / ARCHIVED
+                                    </span>
+                                  ) : (
+                                    <span className="bg-green-500/10 text-green-400 text-[10px] font-mono px-2 py-0.5 rounded-md font-bold">
+                                      🟢 ACTIVE DESK
+                                    </span>
+                                  )}
+
+                                  {(session.unreadCount || 0) > 0 && (
+                                    <span className="bg-red-500 text-white font-mono text-[9px] px-1.5 py-0.5 rounded-full font-black animate-pulse">
+                                      {session.unreadCount} UNREAD
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-gray-450 font-mono text-[10px]">
+                                  💬 Total messages: {session.messages?.length || 0}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="p-4 font-mono text-gray-400 text-[11px]">
+                              {session.lastUpdated}
+                            </td>
+                            <td className="p-4">
+                              <div className="flex items-center justify-center gap-2">
+                                {/* Jump to chat */}
+                                <button
+                                  onClick={() => {
+                                    setActiveChatId(session.userId);
+                                    setSupportSubTab('chat');
+                                    triggerAlert(`Replying to ${session.userName}`);
+                                  }}
+                                  className="bg-red-650/10 hover:bg-red-600 text-red-400 hover:text-white border border-red-500/20 px-3 py-1.5 rounded-lg transition-all font-mono font-bold cursor-pointer"
+                                  title="Open Chat Stream"
+                                >
+                                  💬 Reply
+                                </button>
+
+                                {/* Clear chat log */}
+                                <button
+                                  onClick={() => {
+                                    showConfirm(
+                                      "Bulk Clear Messages History",
+                                      `Permanently format and clear the support inbox log with "${session.userName}"? This cannot be undone.`,
+                                      async () => {
+                                        await clearChatSession(session.userId);
+                                        setChatSessions((prev) =>
+                                          prev.map((s) => s.userId === session.userId ? { ...s, messages: [], unreadCount: 0 } : s)
+                                        );
+                                        triggerAlert("Log cleared successfully.");
+                                      }
+                                    );
+                                  }}
+                                  className="bg-white/5 hover:bg-white/11 text-gray-300 px-3 py-1.5 rounded-lg transition-all font-mono border border-white/5 cursor-pointer"
+                                  title="Format Message Stream"
+                                >
+                                  🧹 Wipe
+                                </button>
+
+                                {/* Hide or Restore */}
+                                {session.deletedByAdmin ? (
+                                  <button
+                                    onClick={async () => {
+                                      showConfirm(
+                                        "Restore to Live Display",
+                                        `Restore "${session.userName}"'s thread to the active chat log list?`,
+                                        async () => {
+                                          await restoreChatFromAdmin(session.userId);
+                                          setChatSessions((prev) => prev.map(c => c.userId === session.userId ? { ...c, deletedByAdmin: false } : c));
+                                          triggerAlert("Thread restored to active display logs.");
+                                        }
+                                      );
+                                    }}
+                                    className="bg-green-500/10 hover:bg-green-550 hover:text-white text-green-400 border border-green-500/10 px-3 py-1.5 rounded-lg transition-all font-mono cursor-pointer"
+                                    title="Unarchive Thread"
+                                  >
+                                    🔓 Restore
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => {
+                                      showConfirm(
+                                        "Hide Stream from Display",
+                                        `Hide the chat conversation with subscriber "${session.userName}" from active desk lists? The user will still hold their active copies safely inside their client panels.`,
+                                        async () => {
+                                          await hideChatFromAdmin(session.userId);
+                                          setChatSessions((prev) => prev.map(c => c.userId === session.userId ? { ...c, deletedByAdmin: true } : c));
+                                          if (activeChatId === session.userId) {
+                                            setActiveChatId(null);
+                                          }
+                                          triggerAlert("Thread marked as deleted for Admin Only.");
+                                        }
+                                      );
+                                    }}
+                                    className="bg-amber-500/10 hover:bg-amber-500 hover:text-black text-amber-500 border border-amber-500/10 px-3 py-1.5 rounded-lg transition-all font-mono cursor-pointer"
+                                    title="Archive from view"
+                                  >
+                                    🚫 Archive
+                                  </button>
+                                )}
+
+                                {/* Delete session fully */}
+                                <button
+                                  onClick={() => {
+                                    showConfirm(
+                                      "Permanent Purge",
+                                      `Crucial Warning: This completely deletes the live support document for student/viewer "${session.userName}" from the Firestore Database. It cannot be recovered. Ensure you want to close this stream fully.`,
+                                      async () => {
+                                        await deleteChatSession(session.userId);
+                                        setChatSessions((prev) => prev.filter(c => c.userId !== session.userId));
+                                        if (activeChatId === session.userId) {
+                                          setActiveChatId(null);
+                                        }
+                                        triggerAlert("Correspondence purged completely.");
+                                      }
+                                    );
+                                  }}
+                                  className="bg-red-500/10 hover:bg-red-650 hover:text-white text-red-500 border border-red-550/15 px-3 py-1.5 rounded-lg transition-all font-mono cursor-pointer"
+                                  title="Erase Document Entirely"
+                                >
+                                  🗑️ Purge
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ));
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+
+              </div>
+            )}
 
           </div>
         )}
@@ -2937,125 +3232,205 @@ export default function AdminPanel() {
               )}
             </div>
 
-            {/* Complete premium sales listing ledger */}
-            <div className="glass p-6 rounded-3xl">
-              <h3 className="font-display font-medium text-lg text-white mb-6">Historical Upgrade Ledger</h3>
-              
-              {payments.length === 0 ? (
-                <div className="text-center py-20 opacity-65">
-                  <AlertCircle className="w-10 h-10 text-gray-700 mx-auto mb-2" />
-                  <p className="text-xs text-gray-500 font-mono">No subscription history exists in the financial record database yet.</p>
+            {/* VIP Premium Subscriptions Moderation Dashboard Control Panel */}
+            <div className="glass p-6 rounded-3xl space-y-6">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                  <h3 className="font-display font-extrabold text-lg text-white">VIP Premium Upgrade Ledgers</h3>
+                  <p className="text-xs text-gray-400">Verifying cash transactions of bkash, nagad or banks to activate subscriber VIP accounts manually.</p>
                 </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-white/5 text-gray-500 font-mono">
-                        <th className="pb-3 px-3">Subscriber</th>
-                        <th className="pb-3 px-3">Method</th>
-                        <th className="pb-3 px-3">Sender number</th>
-                        <th className="pb-3 px-3">Transaction ID</th>
-                        <th className="pb-3 px-3 text-right">Amount paid (BDT)</th>
-                        <th className="pb-3 px-3 text-center">কবে কিনেছে (Purchase)</th>
-                        <th className="pb-3 px-3 text-center">কবে শেষ হবে (Expiry)</th>
-                        <th className="pb-3 px-3 text-center">Status</th>
-                        <th className="pb-3 px-3 text-right">System Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {payments.map((p) => (
-                        <tr key={p.id} className="border-b border-white/5 hover:bg-white/[0.01] transition-all">
-                          <td className="py-4.5 px-3 font-medium text-white">
-                            <div>{p.userName}</div>
-                            <span className="text-[10px] text-gray-500 font-mono">{p.userEmail}</span>
-                          </td>
-                          <td className="py-4.5 px-3 uppercase text-yellow-500 font-mono font-bold">{p.method}</td>
-                          <td className="py-4.5 px-3 font-mono text-gray-300">{p.senderNumber}</td>
-                          <td className="py-4.5 px-3 font-mono text-xs text-red-400 font-extrabold select-all">{p.transactionId}</td>
-                          <td className="py-4.5 px-3 text-right text-emerald-400 font-mono font-bold">৳{p.amount}</td>
-                          <td className="py-4.5 px-3 text-center">
-                            <div className="font-mono text-xs text-sky-400 font-bold">
-                              {(() => {
-                                if (!p.timestamp) return 'N/A';
-                                const d = new Date(p.timestamp);
-                                if (isNaN(d.getTime())) return p.timestamp;
-                                return d.toLocaleDateString('bn-BD', { year: 'numeric', month: 'long', day: 'numeric' });
-                              })()}
-                            </div>
-                            <span className="text-[9px] text-gray-500 font-mono block">
-                              {p.timestamp && !isNaN(new Date(p.timestamp).getTime()) ? new Date(p.timestamp).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : ''}
-                            </span>
-                          </td>
-                          <td className="py-4.5 px-3 text-center">
-                            <div className="font-mono text-xs text-emerald-400 font-bold">
-                              {(() => {
-                                if (!p.timestamp) return 'N/A';
-                                const d = new Date(p.timestamp);
-                                if (isNaN(d.getTime())) return `${p.durationDays || 30} Days`;
-                                const exp = new Date(d.getTime() + (p.durationDays || 30) * 24 * 60 * 60 * 1000);
-                                return exp.toLocaleDateString('bn-BD', { year: 'numeric', month: 'long', day: 'numeric' });
-                              })()}
-                            </div>
-                            <span className="text-[9px] text-gray-500 font-mono block">
-                              {p.timestamp && !isNaN(new Date(p.timestamp).getTime()) ? 
-                                new Date(new Date(p.timestamp).getTime() + (p.durationDays || 30) * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) 
-                                : ''}
-                            </span>
-                          </td>
-                          <td className="py-4.5 px-3 text-center">
-                            {p.status === 'pending' && (
-                              <div className="flex justify-center space-x-1">
+                
+                {/* Real-time search */}
+                <div className="relative w-full md:w-72">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-gray-500">
+                    <Search className="w-4 h-4" />
+                  </span>
+                  <input
+                    type="text"
+                    value={ledgerSearch}
+                    onChange={(e) => setLedgerSearch(e.target.value)}
+                    placeholder="Search name, txn hash, phone..."
+                    className="w-full bg-[#0c0c0e]/80 border border-white/5 focus:border-red-500 focus:outline-none rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-gray-500 font-sans"
+                  />
+                  {ledgerSearch && (
+                    <button
+                      onClick={() => setLedgerSearch('')}
+                      className="absolute inset-y-0 right-0 flex items-center pr-3 text-[10px] font-mono text-gray-500 hover:text-white"
+                    >
+                      CLEAR
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Filtering Controls */}
+              <div className="flex flex-wrap gap-2.5 bg-black/35 p-1 rounded-2xl border border-white/5">
+                {[
+                  { value: 'pending', label: 'Pending Verification', count: payments.filter(p => p.status === 'pending').length, badgeColor: 'bg-yellow-500 text-black' },
+                  { value: 'approved', label: 'Approved VIPs', count: payments.filter(p => p.status === 'approved').length, badgeColor: 'bg-emerald-500 text-white' },
+                  { value: 'rejected', label: 'Rejected Orders', count: payments.filter(p => p.status === 'rejected').length, badgeColor: 'bg-red-500 text-white' },
+                  { value: 'all', label: 'All Ledgers', count: payments.length, badgeColor: 'bg-gray-700 text-gray-300' }
+                ].map((tab) => {
+                  const isActive = ledgerFilter === tab.value;
+                  return (
+                    <button
+                      key={tab.value}
+                      onClick={() => setLedgerFilter(tab.value as any)}
+                      className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
+                        isActive
+                          ? 'bg-red-650 text-white shadow-lg'
+                          : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <span>{tab.label}</span>
+                      <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-black ${isActive ? 'bg-white text-black' : tab.badgeColor}`}>
+                        {tab.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Table ledger body */}
+              {(() => {
+                const filteredPayments = payments.filter((p) => {
+                  if (ledgerFilter !== 'all' && p.status !== ledgerFilter) return false;
+                  if (ledgerSearch.trim() !== '') {
+                    const term = ledgerSearch.toLowerCase();
+                    const name = (p.userName || '').toLowerCase();
+                    const email = (p.userEmail || '').toLowerCase();
+                    const method = (p.method || '').toLowerCase();
+                    const sender = (p.senderNumber || '').toLowerCase();
+                    const txId = (p.transactionId || '').toLowerCase();
+                    return name.includes(term) || email.includes(term) || method.includes(term) || sender.includes(term) || txId.includes(term);
+                  }
+                  return true;
+                });
+
+                if (filteredPayments.length === 0) {
+                  return (
+                    <div className="text-center py-20 bg-[#08080a] border border-white/5 rounded-2xl">
+                      <AlertCircle className="w-10 h-10 text-gray-600 mx-auto mb-2" />
+                      <p className="text-xs text-gray-500 font-mono">No subscription history matched the selected filter context.</p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-white/5 text-gray-500 font-mono">
+                          <th className="pb-3 px-3">Subscriber Info</th>
+                          <th className="pb-3 px-3">Method</th>
+                          <th className="pb-3 px-3">Sender Account</th>
+                          <th className="pb-3 px-3">Transaction ID (TxID)</th>
+                          <th className="pb-3 px-3 text-right">Amount paid (BDT)</th>
+                          <th className="pb-3 px-3 text-center">Purchase Date</th>
+                          <th className="pb-3 px-3 text-center">Intended Expiry</th>
+                          <th className="pb-3 px-3 text-center">Moderation Action</th>
+                          <th className="pb-3 px-3 text-right">System Management</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredPayments.map((p) => (
+                          <tr key={p.id} className="border-b border-white/5 hover:bg-white/[0.01] transition-all">
+                            <td className="py-4.5 px-3 font-medium text-white">
+                              <div className="font-sans font-bold leading-tight">{p.userName}</div>
+                              <span className="text-[10px] text-gray-500 font-mono block mt-0.5">{p.userEmail}</span>
+                            </td>
+                            <td className="py-4.5 px-3 uppercase text-yellow-500 font-mono font-black">{p.method}</td>
+                            <td className="py-4.5 px-3 font-mono text-gray-300 font-bold select-all">{p.senderNumber}</td>
+                            <td className="py-4.5 px-3 font-mono text-xs text-red-400 font-extrabold select-all tracking-wider">{p.transactionId}</td>
+                            <td className="py-4.5 px-3 text-right text-emerald-400 font-mono font-bold">৳{p.amount}</td>
+                            <td className="py-4.5 px-3 text-center">
+                              <div className="font-mono text-xs text-sky-400 font-bold">
+                                {(() => {
+                                  if (!p.timestamp) return 'N/A';
+                                  const d = new Date(p.timestamp);
+                                  if (isNaN(d.getTime())) return p.timestamp;
+                                  return d.toLocaleDateString('bn-BD', { year: 'numeric', month: 'long', day: 'numeric' });
+                                })()}
+                              </div>
+                              <span className="text-[9px] text-gray-500 font-mono block">
+                                {p.timestamp && !isNaN(new Date(p.timestamp).getTime()) ? new Date(p.timestamp).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : ''}
+                              </span>
+                            </td>
+                            <td className="py-4.5 px-3 text-center">
+                              <div className="font-mono text-xs text-emerald-400 font-bold">
+                                {(() => {
+                                  if (!p.timestamp) return 'N/A';
+                                  const d = new Date(p.timestamp);
+                                  if (isNaN(d.getTime())) return `${p.durationDays || 30} Days`;
+                                  const exp = new Date(d.getTime() + (p.durationDays || 30) * 24 * 60 * 60 * 1000);
+                                  return exp.toLocaleDateString('bn-BD', { year: 'numeric', month: 'long', day: 'numeric' });
+                                })()}
+                              </div>
+                              <span className="text-[9px] text-gray-500 font-mono block">
+                                {p.timestamp && !isNaN(new Date(p.timestamp).getTime()) ? 
+                                  new Date(new Date(p.timestamp).getTime() + (p.durationDays || 30) * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) 
+                                  : ''}
+                              </span>
+                            </td>
+                            <td className="py-4.5 px-3 text-center">
+                              {p.status === 'pending' && (
+                                <div className="flex justify-center space-x-1.5">
+                                  <button
+                                    onClick={() => handlePaymentApprove(p.id)}
+                                    className="bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-white px-2.5 py-1.5 rounded-lg text-[10px] font-mono font-bold tracking-wider transition-all cursor-pointer flex items-center gap-1"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    <span>APPROVE</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handlePaymentReject(p.id)}
+                                    className="bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white px-2.5 py-1.5 rounded-lg text-[10px] font-mono font-bold tracking-wider transition-all cursor-pointer flex items-center gap-1"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                    <span>REJECT</span>
+                                  </button>
+                                </div>
+                              )}
+                              {p.status === 'approved' && (
+                                <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1 rounded-full text-[10px] font-mono font-bold select-none">
+                                  <Check className="w-3 h-3" />
+                                  <span>APPROVED VIP</span>
+                                </span>
+                              )}
+                              {p.status === 'rejected' && (
+                                <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-3 py-1 rounded-full text-[10px] font-mono font-medium select-none">
+                                  <X className="w-3 h-3" />
+                                  <span>REJECTED</span>
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-4.5 px-3 text-right">
+                              <div className="flex items-center justify-end space-x-2">
                                 <button
-                                  onClick={() => handlePaymentApprove(p.id)}
-                                  className="bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-white px-2 py-1 rounded text-[10px] font-mono transition-all cursor-pointer"
+                                  onClick={() => startEditingPayment(p)}
+                                  className="bg-yellow-500/10 hover:bg-yellow-500 text-yellow-500 hover:text-black px-2.5 py-1.5 rounded-lg text-[10px] font-mono transition-all cursor-pointer flex items-center gap-1"
+                                  title="Edit Subscription Details"
                                 >
-                                  APPROVE
+                                  <Edit2 className="w-3 h-3" />
+                                  <span>Edit</span>
                                 </button>
                                 <button
-                                  onClick={() => handlePaymentReject(p.id)}
-                                  className="bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white px-2 py-1 rounded text-[10px] font-mono transition-all cursor-pointer"
+                                  onClick={() => handleDeletePaymentClick(p)}
+                                  className="bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white px-2.5 py-1.5 rounded-lg text-[10px] font-mono transition-all cursor-pointer flex items-center gap-1"
+                                  title="Delete Subscriber"
                                 >
-                                  REJECT
+                                  <Trash2 className="w-3 h-3" />
+                                  <span>Delete</span>
                                 </button>
                               </div>
-                            )}
-                            {p.status === 'approved' && (
-                              <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold select-none">
-                                APPROVED
-                              </span>
-                            )}
-                            {p.status === 'rejected' && (
-                              <span className="bg-red-500/10 text-red-500 border border-red-500/25 px-2.5 py-1 rounded-full text-[10px] font-mono select-none">
-                                REJECTED
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-4.5 px-3 text-right">
-                            <div className="flex items-center justify-end space-x-2">
-                              <button
-                                onClick={() => startEditingPayment(p)}
-                                className="bg-yellow-500/10 hover:bg-yellow-500 text-yellow-500 hover:text-black px-2.5 py-1 rounded-lg text-[10px] font-mono transition-all cursor-pointer flex items-center gap-1"
-                                title="Edit Subscription Details"
-                              >
-                                <Edit2 className="w-3 h-3" />
-                                <span>Edit</span>
-                              </button>
-                              <button
-                                onClick={() => handleDeletePaymentClick(p)}
-                                className="bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white px-2.5 py-1 rounded-lg text-[10px] font-mono transition-all cursor-pointer flex items-center gap-1"
-                                title="Delete Subscriber"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                <span>Delete</span>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Subscriber Editing Modal Pop-up */}
@@ -3989,6 +4364,7 @@ export default function AdminPanel() {
                       setNewBannerContentId('');
                       setNewBannerLink('');
                       setNewBannerIsActive(true);
+                      setNewBannerExpirationDays('');
                     }}
                     className="bg-white/5 hover:bg-white/10 text-gray-400 text-xs font-mono px-4 py-2 rounded-xl transition-all"
                   >
@@ -4133,6 +4509,17 @@ export default function AdminPanel() {
                           placeholder="e.g. m_12345"
                         />
                       </div>
+                      <div>
+                        <label className="text-[10px] text-gray-400 font-mono block mb-1">⏳ Auto Banner Expiration (Days)</label>
+                        <input
+                          type="number"
+                          value={newBannerExpirationDays}
+                          onChange={(e) => setNewBannerExpirationDays(e.target.value)}
+                          className="w-full bg-black/40 border border-white/5 focus:border-red-500 focus:outline-none rounded-xl px-3 py-2.5 text-xs text-white font-mono"
+                          placeholder="e.g. 30 (Empty for unlimited)"
+                          min={1}
+                        />
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-between p-3 bg-neutral-900/60 rounded-xl border border-white/5">
@@ -4161,31 +4548,51 @@ export default function AdminPanel() {
                           let updatedB: BannerItem[] = [];
 
                           if (editingBannerId) {
-                            updatedB = allBanners.map(b => b.id === editingBannerId ? {
-                              ...b,
-                              title: newBannerTitle.trim(),
-                              description: newBannerDesc.trim(),
-                              coverUrl: newBannerUrl.trim(),
-                              category: newBannerCategory,
-                              contentId: newBannerContentId.trim(),
-                              link: newBannerLink.trim() || undefined,
-                              isActive: newBannerIsActive
-                            } : b);
+                            updatedB = allBanners.map(b => {
+                              if (b.id === editingBannerId) {
+                                const updated: any = {
+                                  ...b,
+                                  title: newBannerTitle.trim(),
+                                  description: newBannerDesc.trim(),
+                                  coverUrl: newBannerUrl.trim(),
+                                  category: newBannerCategory,
+                                  contentId: newBannerContentId.trim(),
+                                  isActive: newBannerIsActive
+                                };
+                                if (newBannerLink.trim()) {
+                                  updated.link = newBannerLink.trim();
+                                } else {
+                                  delete updated.link;
+                                }
+                                if (newBannerExpirationDays.trim()) {
+                                  updated.expirationDays = Number(newBannerExpirationDays);
+                                } else {
+                                  delete updated.expirationDays;
+                                }
+                                return updated as BannerItem;
+                              }
+                              return b;
+                            });
                             triggerAlert("Hero slide modified successfully.");
                           } else {
-                            const slide: BannerItem = {
+                            const slide: any = {
                               id: 'banner-custom-' + Date.now().toString(36),
                               title: newBannerTitle.trim(),
                               description: newBannerDesc.trim(),
                               coverUrl: newBannerUrl.trim(),
                               category: newBannerCategory,
                               contentId: newBannerContentId.trim(),
-                              link: newBannerLink.trim() || undefined,
                               isActive: newBannerIsActive,
                               type: 'custom',
                               createdAt: Date.now()
                             };
-                            updatedB = [slide, ...allBanners];
+                            if (newBannerLink.trim()) {
+                              slide.link = newBannerLink.trim();
+                            }
+                            if (newBannerExpirationDays.trim()) {
+                              slide.expirationDays = Number(newBannerExpirationDays);
+                            }
+                            updatedB = [slide as BannerItem, ...allBanners];
                             triggerAlert("Custom hero slide appended!");
                           }
 
@@ -4202,6 +4609,7 @@ export default function AdminPanel() {
                           setNewBannerContentId('');
                           setNewBannerLink('');
                           setNewBannerIsActive(true);
+                          setNewBannerExpirationDays('');
                         }}
                         className="w-full bg-red-650 hover:bg-red-600 font-mono font-bold text-xs py-3 rounded-xl uppercase tracking-wider text-white transition-all shadow-md shadow-red-950/20 cursor-pointer"
                       >
@@ -4236,6 +4644,11 @@ export default function AdminPanel() {
                               
                               <div className="flex items-center gap-2 mt-1 flex-wrap">
                                 <span className="text-[8px] opacity-70 font-mono bg-white/5 border border-white/10 px-1 text-gray-400 rounded inline-block">{ban.category}</span>
+                                {ban.expirationDays && (
+                                  <span className="text-[8px] font-mono bg-yellow-500/10 text-yellow-500 border border-yellow-500/20 px-1 rounded inline-block">
+                                    ⏳ {ban.expirationDays} Days Expire
+                                  </span>
+                                )}
                                 {ban.link && (
                                   <span className="text-[8px] font-mono bg-blue-500/10 text-blue-400 px-1 rounded truncate max-w-[120px]" title={ban.link}>
                                     🔗 {ban.link}
@@ -4274,6 +4687,7 @@ export default function AdminPanel() {
                                 setNewBannerContentId(ban.contentId || '');
                                 setNewBannerLink(ban.link || '');
                                 setNewBannerIsActive(ban.isActive !== false);
+                                setNewBannerExpirationDays(ban.expirationDays !== undefined ? String(ban.expirationDays) : '');
                               }}
                               className="p-1 px-2 text-[9px] font-mono bg-white/5 hover:bg-white/10 text-gray-300 rounded-lg flex items-center space-x-1 transition-all"
                             >

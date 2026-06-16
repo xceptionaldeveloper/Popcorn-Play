@@ -6,7 +6,7 @@
 
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut as firebaseSignOut, onAuthStateChanged, User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateEmail, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
-import { getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc, getDocs, query, orderBy, limit, getDocFromServer } from 'firebase/firestore';
+import { getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc, getDocs, query, orderBy, limit, getDocFromServer, where } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { ContentItem, NotificationItem, SupportSession, PaymentRequest, AppSettings, VisitorStat, UserProfile, ChatMessage, PremiumPlan, BannerItem } from '../types';
 
@@ -354,7 +354,7 @@ export async function signInWithGoogle(): Promise<UserProfile> {
     const dummyUser: UserProfile = {
       uid: 'google-usr-123',
       name: 'Ikhlas Uddin',
-      email: 'admin@popcornplay.com',
+      email: 'guest.ikhlas@gmail.com',
       isPremium: getLocal('pp_premium_user_status', false),
       favorites: getLocal('pp_user_favorites', ['m1', 'a2'])
     };
@@ -480,8 +480,21 @@ export async function customSignIn(email: string, passwordInput: string): Promis
 }
 
 export async function logOut(): Promise<void> {
+  localStorage.removeItem('pp_premium_until');
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('pp_premium_user_status', 'false');
+  }
   if (IS_FIREBASE_REAL && firebaseAuth) {
     await firebaseSignOut(firebaseAuth);
+  }
+}
+
+export function subscribeAuth(callback: (user: any) => void) {
+  if (IS_FIREBASE_REAL && firebaseAuth) {
+    return onAuthStateChanged(firebaseAuth, callback);
+  } else {
+    callback(getLocal('pp_current_user', null));
+    return () => {};
   }
 }
 
@@ -751,6 +764,94 @@ export function subscribeContent(callback: (items: ContentItem[]) => void) {
   }
 }
 
+// Real-Time query search & filter using Firestore
+export function subscribeContentFiltered(
+  category: string,
+  subCategory: string,
+  searchQuery: string,
+  callback: (items: ContentItem[]) => void
+) {
+  const sortContent = (list: ContentItem[]) => {
+    return [...list].sort((a, b) => {
+      const timeA = a.updatedAt || a.createdAt || 0;
+      const timeB = b.updatedAt || b.createdAt || 0;
+      if (timeB !== timeA) {
+        return timeB - timeA;
+      }
+      return (b.id || '').localeCompare(a.id || '');
+    });
+  };
+
+  if (IS_FIREBASE_REAL && firebaseDb) {
+    let q = query(collection(firebaseDb, 'content'));
+
+    // Apply Firestore queries dynamically
+    // To prevent Firestore from complaining about missing composite indexes, we prioritize the tag/genre filter
+    // or fallback to category-specific collection queries where appropriate. Both are computed directly on Firebase Cloud.
+    if (subCategory && subCategory !== 'All') {
+      q = query(q, where('tags', 'array-contains', subCategory));
+    } else if (category && category !== 'All') {
+      q = query(q, where('category', '==', category));
+    }
+
+    return onSnapshot(q, (snap) => {
+      const list: ContentItem[] = [];
+      snap.forEach((doc) => {
+        list.push({ id: doc.id, ...doc.data() } as ContentItem);
+      });
+
+      let results = list;
+
+      // In case we only queried by tag but also have category, filter the category first
+      if (subCategory && subCategory !== 'All' && category && category !== 'All') {
+        results = results.filter(item => item.category === category);
+      }
+
+      // If user typed a search query, perform a real-time matching text search on title, category, description, and tags
+      if (searchQuery.trim()) {
+        const queryLower = searchQuery.toLowerCase().trim();
+        results = results.filter(item => {
+          const matchTitle = (item.title || '').toLowerCase().includes(queryLower);
+          const matchDesc = (item.description || '').toLowerCase().includes(queryLower);
+          const matchCategory = (item.category || '').toLowerCase().includes(queryLower);
+          const matchTags = (item.tags || []).some(t => t.toLowerCase().includes(queryLower));
+          return matchTitle || matchDesc || matchCategory || matchTags;
+        });
+      }
+
+      callback(sortContent(results));
+    }, (err) => {
+      console.warn("error loading filtered content from Firestore:", err);
+      // Fallback
+      const offline = getLocal('pp_content', DEFAULT_CONTENT) as ContentItem[];
+      callback(sortContent(offline));
+    });
+  } else {
+    // Offline simulation mode using localStorage
+    const handleStorage = () => {
+      const all = getLocal('pp_content', DEFAULT_CONTENT) as ContentItem[];
+      const filtered = all.filter(item => {
+        if (category && category !== 'All' && item.category !== category) return false;
+        if (subCategory && subCategory !== 'All' && !(item.tags || []).some(t => t.toLowerCase() === subCategory.toLowerCase())) return false;
+        if (searchQuery.trim()) {
+          const term = searchQuery.toLowerCase().trim();
+          const matchTitle = (item.title || '').toLowerCase().includes(term);
+          const matchDesc = (item.description || '').toLowerCase().includes(term);
+          const matchCategory = (item.category || '').toLowerCase().includes(term);
+          const matchTags = (item.tags || []).some(t => t.toLowerCase().includes(term));
+          if (!matchTitle && !matchDesc && !matchCategory && !matchTags) return false;
+        }
+        return true;
+      });
+      callback(sortContent(filtered));
+    };
+
+    handleStorage();
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }
+}
+
 export async function saveContentItem(item: ContentItem) {
   const current = getLocal('pp_content', DEFAULT_CONTENT) as ContentItem[];
   const existingIndex = current.findIndex(c => c.id === item.id);
@@ -987,6 +1088,22 @@ export async function updatePaymentRequestStatus(reqId: string, status: 'approve
     }
   }
 
+  // Sync general local storage user session and details
+  if (payReq) {
+    const userSessionKey = `pp_user_session_${payReq.userId}`;
+    const localUser = getLocal(userSessionKey, null) as UserProfile | null;
+    if (localUser) {
+      let currentExpiry = Date.now();
+      if (localUser.premiumUntil && localUser.premiumUntil > Date.now() && status === 'approved') {
+        currentExpiry = localUser.premiumUntil;
+      }
+      const nextExpiry = status === 'approved' ? (currentExpiry + durationDays * 24 * 60 * 60 * 1000) : null;
+      localUser.isPremium = (status === 'approved');
+      localUser.premiumUntil = nextExpiry;
+      setLocal(userSessionKey, localUser);
+    }
+  }
+
   // Sync client-side session immediately if this belongs to the active logged-in user
   if (payReq) {
     const cachedUserStr = localStorage.getItem('pp_current_user');
@@ -995,9 +1112,8 @@ export async function updatePaymentRequestStatus(reqId: string, status: 'approve
         const cachedUser = JSON.parse(cachedUserStr) as UserProfile;
         if (cachedUser.uid === payReq.userId) {
           if (status === 'approved') {
-            const currentExpiry = Number(localStorage.getItem('pp_premium_until')) || Date.now();
-            const baseStart = currentExpiry > Date.now() ? currentExpiry : Date.now();
-            const nextExpiry = baseStart + durationDays * 24 * 60 * 60 * 1000;
+            const currentExpiry = cachedUser.premiumUntil && cachedUser.premiumUntil > Date.now() ? cachedUser.premiumUntil : Date.now();
+            const nextExpiry = currentExpiry + durationDays * 24 * 60 * 60 * 1000;
             setLocal('pp_premium_user_status', true);
             localStorage.setItem('pp_premium_until', String(nextExpiry));
             
@@ -1154,6 +1270,22 @@ export async function modifyPaymentRequestByAdmin(reqId: string, updatedFields: 
     }
   }
 
+  // Always synchronize local user profiles too (for local storage / fallback consistency)
+  if (mergedReq) {
+    const userSessionKey = `pp_user_session_${mergedReq.userId}`;
+    const localUser = getLocal(userSessionKey, null) as UserProfile | null;
+    if (localUser) {
+      let currentExpiry = Date.now();
+      if (localUser.premiumUntil && localUser.premiumUntil > Date.now() && updatedFields.status === 'approved') {
+        currentExpiry = localUser.premiumUntil;
+      }
+      const nextExpiry = updatedFields.status === 'approved' ? (currentExpiry + durationDays * 24 * 60 * 60 * 1000) : null;
+      localUser.isPremium = (updatedFields.status === 'approved');
+      localUser.premiumUntil = nextExpiry;
+      setLocal(userSessionKey, localUser);
+    }
+  }
+
   // Also sync locally if current browser user matches
   if (mergedReq) {
     const cachedUserStr = localStorage.getItem('pp_current_user');
@@ -1162,9 +1294,8 @@ export async function modifyPaymentRequestByAdmin(reqId: string, updatedFields: 
         const cachedUser = JSON.parse(cachedUserStr) as UserProfile;
         if (cachedUser.uid === mergedReq.userId) {
           if (updatedFields.status === 'approved') {
-            const currentExpiry = Number(localStorage.getItem('pp_premium_until')) || Date.now();
-            const baseStart = currentExpiry > Date.now() ? currentExpiry : Date.now();
-            const nextExpiry = baseStart + durationDays * 24 * 60 * 60 * 1000;
+            const currentExpiry = cachedUser.premiumUntil && cachedUser.premiumUntil > Date.now() ? cachedUser.premiumUntil : Date.now();
+            const nextExpiry = currentExpiry + durationDays * 24 * 60 * 60 * 1000;
             setLocal('pp_premium_user_status', true);
             localStorage.setItem('pp_premium_until', String(nextExpiry));
             
@@ -1376,6 +1507,7 @@ export async function sendMessage(userId: string, userName: string, userEmail: s
   session.lastUpdated = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   if (sender === 'user') {
     session.unreadCount = (session.unreadCount || 0) + 1;
+    session.deletedByAdmin = false;
   } else {
     session.unreadCount = 0;
   }
@@ -1406,6 +1538,57 @@ export async function clearChatSession(userId: string) {
       await setDoc(doc(firebaseDb, 'live_support', userId), { messages: [], unreadCount: 0 }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `live_support/${userId}`);
+    }
+  }
+  window.dispatchEvent(new Event('storage'));
+}
+
+export async function hideChatFromAdmin(userId: string) {
+  const chats = getLocal('pp_chats', {}) as { [uId: string]: SupportSession };
+  if (chats[userId]) {
+    chats[userId].deletedByAdmin = true;
+    setLocal('pp_chats', chats);
+  }
+
+  if (IS_FIREBASE_REAL && firebaseDb) {
+    try {
+      await setDoc(doc(firebaseDb, 'live_support', userId), { deletedByAdmin: true }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `live_support/${userId}`);
+    }
+  }
+  window.dispatchEvent(new Event('storage'));
+}
+
+export async function restoreChatFromAdmin(userId: string) {
+  const chats = getLocal('pp_chats', {}) as { [uId: string]: SupportSession };
+  if (chats[userId]) {
+    chats[userId].deletedByAdmin = false;
+    setLocal('pp_chats', chats);
+  }
+
+  if (IS_FIREBASE_REAL && firebaseDb) {
+    try {
+      await setDoc(doc(firebaseDb, 'live_support', userId), { deletedByAdmin: false }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `live_support/${userId}`);
+    }
+  }
+  window.dispatchEvent(new Event('storage'));
+}
+
+export async function deleteChatSession(userId: string) {
+  const chats = getLocal('pp_chats', {}) as { [uId: string]: SupportSession };
+  if (chats[userId]) {
+    delete chats[userId];
+    setLocal('pp_chats', chats);
+  }
+
+  if (IS_FIREBASE_REAL && firebaseDb) {
+    try {
+      await deleteDoc(doc(firebaseDb, 'live_support', userId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `live_support/${userId}`);
     }
   }
   window.dispatchEvent(new Event('storage'));

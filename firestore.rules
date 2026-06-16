@@ -182,7 +182,7 @@ service cloud.firestore {
                       (isLocalUser(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['messages', 'lastUpdated', 'unreadCount'])) ||
                       (isSignedIn() && isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['messages', 'lastUpdated', 'unreadCount']))
                     );
-      allow delete: if false;
+      allow delete: if (isSignedIn() && (isOwner(userId) || isAdmin())) || isLocalUser(userId);
     }
 
   }

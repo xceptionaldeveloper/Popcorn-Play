@@ -12,8 +12,8 @@ import {
   SLIDER_ANIMATIONS
 } from '../types';
 import { 
-  subscribeContent, subscribeAppSettings, subscribeNotifications, 
-  subscribeUserChat, sendMessage, submitPaymentRequest, clearChatSession, signInWithGoogle, customSignUp,
+  subscribeContent, subscribeAppSettings, subscribeNotifications, subscribeContentFiltered,
+  subscribeUserChat, sendMessage, submitPaymentRequest, clearChatSession, deleteChatSession, signInWithGoogle, customSignUp,
   customSignIn, subscribeUserProfile, updateUserProfile
 } from '../lib/firebaseStore';
 
@@ -99,6 +99,31 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   const [pinEntry, setPinEntry] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
 
+  // Dynamic Confirmation Dialog Modal (bypasses iframe window.confirm blocks)
+  const [customModal, setCustomModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void | Promise<void>;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void | Promise<void>) => {
+    setCustomModal({
+      isOpen: true,
+      title,
+      message,
+      onConfirm: async () => {
+        setCustomModal(prev => ({ ...prev, isOpen: false }));
+        await onConfirm();
+      }
+    });
+  };
+
   // Floating Support Chat
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportText, setSupportText] = useState('');
@@ -118,7 +143,20 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   const rawBanners = settings?.banners || [];
   
   // Custom Banners from settings
-  const activeCustomBanners = rawBanners.filter(b => b.type !== 'auto' && b.isActive !== false);
+  const activeCustomBanners = rawBanners.filter(b => {
+    if (b.type === 'auto') return false;
+    if (b.isActive === false) return false;
+    const expDays = b.expirationDays !== undefined && b.expirationDays !== null ? Number(b.expirationDays) : NaN;
+    if (!isNaN(expDays) && expDays > 0) {
+      const bannerCreatedAt = b.createdAt || nowTime;
+      const ageMs = nowTime - bannerCreatedAt;
+      const maxAgeMs = expDays * 24 * 60 * 60 * 1000;
+      if (ageMs > maxAgeMs) {
+        return false;
+      }
+    }
+    return true;
+  });
   
   // Real active Auto-Banners saved in settings
   const activeSavedAutoBanners = rawBanners.filter(b => b.type === 'auto' && b.isActive !== false);
@@ -151,7 +189,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     contentId: item.id,
     isActive: true,
     type: 'auto' as const,
-    createdAt: item.createdAt || Date.now()
+    createdAt: item.createdAt || (Date.now() - 45 * 24 * 60 * 60 * 1000) // Fallback as 45 days old so expiration calculation applies
   }));
 
   // Combine explicitly saved auto-banners and virtual auto-banners
@@ -159,9 +197,11 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
 
   // Filter auto-banners by expiration days if specified
   const unexpiredAutoBanners = combinedAutoBanners.filter(b => {
-    if (b.createdAt && autoBannerDays > 0) {
-      const ageMs = nowTime - b.createdAt;
-      const maxAgeMs = autoBannerDays * 24 * 60 * 60 * 1000;
+    const bannerCreatedAt = b.createdAt || (Date.now() - 45 * 24 * 60 * 60 * 1000); // Fallback as 45 days old to support auto banner expiration
+    const daysLimit = b.expirationDays !== undefined && b.expirationDays > 0 ? b.expirationDays : autoBannerDays;
+    if (daysLimit > 0) {
+      const ageMs = nowTime - bannerCreatedAt;
+      const maxAgeMs = daysLimit * 24 * 60 * 60 * 1000;
       if (ageMs > maxAgeMs) {
         return false;
       }
@@ -275,8 +315,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   }, [currentPopupIndex, settings?.popups, showAnnouncePopup]);
 
   useEffect(() => {
-    // Dynamic Firebase data sub
-    const unsubContent = subscribeContent((items) => setContent(items));
+    // Dynamic Firebase data sub for settings & notifications
     const unsubSettings = subscribeAppSettings((conf) => setSettings(conf));
     const unsubNotifications = subscribeNotifications((notifs) => setNotifications(notifs));
 
@@ -287,11 +326,23 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     } catch(e){}
 
     return () => {
-      unsubContent();
       unsubSettings();
       unsubNotifications();
     };
   }, []);
+
+  // Real-time Firestore search/query subscription
+  useEffect(() => {
+    const unsubContent = subscribeContentFiltered(
+      selectedCategory,
+      selectedSubCategory,
+      searchQuery,
+      (items) => setContent(items)
+    );
+    return () => {
+      unsubContent();
+    };
+  }, [selectedCategory, selectedSubCategory, searchQuery]);
 
   // Sync personal local support sessions
   useEffect(() => {
@@ -430,14 +481,20 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   };
 
   // Check locks
+  const isUserPremium = () => {
+    if (!userProfile) return false;
+    if (userProfile.isPremium) {
+      if (userProfile.premiumUntil && Date.now() > userProfile.premiumUntil) {
+        return false;
+      }
+      return true;
+    }
+    return false;
+  };
+
   const isPremiumLocked = (item: ContentItem) => {
     if (!item.isPremium) return false;
-    // If user profile says premium true, then list is unlocked
-    if (userProfile?.isPremium) return false;
-    // Check local storage setting fallback
-    const localPrem = localStorage.getItem('pp_premium_user_status') === 'true';
-    if (localPrem) return false;
-    return true;
+    return !isUserPremium();
   };
 
   // Click watch actions
@@ -681,7 +738,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
           {userProfile ? (
             <div className="flex items-center space-x-2">
               <span className="text-[11px] font-mono text-gray-400 font-black hidden md:block">
-                {userProfile.isPremium || localStorage.getItem('pp_premium_user_status') === 'true' ? '★ VIP PREMIUM' : 'FREE MEMBER'}
+                {isUserPremium() ? '★ VIP PREMIUM' : 'FREE MEMBER'}
               </span>
               <button 
                 onClick={() => setActiveTab('profile')}
@@ -1525,17 +1582,40 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                 </div>
 
                 {chatSession?.messages && chatSession.messages.length > 0 && (
-                  <button
-                    onClick={async () => {
-                      if (window.confirm("Do you want to wipe all local conversation logs? This cannot be undone.")) {
-                        await clearChatSession(userProfile?.uid || '');
-                        triggerAlert("Correspondence logs general purge completed.");
-                      }
-                    }}
-                    className="text-[9.5px] text-red-400 hover:text-red-300 border border-red-500/20 bg-red-500/5 px-2.5 py-1 rounded-lg uppercase font-mono tracking-wider cursor-pointer font-bold shrink-0"
-                  >
-                    Purge Chat
-                  </button>
+                  <div className="flex items-center space-x-2 shrink-0">
+                    <button
+                      onClick={() => {
+                        showConfirm(
+                          "Purge Local Conversation Logs",
+                          "Do you want to wipe all local conversation logs? This cannot be undone.",
+                          async () => {
+                            await clearChatSession(userProfile?.uid || '');
+                            setChatSession(prev => prev ? { ...prev, messages: [], unreadCount: 0 } : null);
+                            triggerAlert("Correspondence logs general purge completed.");
+                          }
+                        );
+                      }}
+                      className="text-[9.5px] text-gray-400 hover:text-white border border-white/10 bg-white/5 px-2.5 py-1 rounded-lg uppercase font-mono tracking-wider cursor-pointer font-bold shrink-0"
+                    >
+                      Clear Logs
+                    </button>
+                    <button
+                      onClick={() => {
+                        showConfirm(
+                          "Delete Chat Session Completely",
+                          "Are you sure you want to delete this support chat session entirely? This will remove all messages from both your screen and the administrator's dashboard in Firebase.",
+                          async () => {
+                            await deleteChatSession(userProfile?.uid || '');
+                            setChatSession(null);
+                            triggerAlert("Live chat session successfully deleted from Cloud.");
+                          }
+                        );
+                      }}
+                      className="text-[9.5px] text-red-450 hover:text-white border border-red-500/20 bg-red-500/10 hover:bg-red-500 px-2.5 py-1 rounded-lg uppercase font-mono tracking-wider cursor-pointer font-black shrink-0 transition-all"
+                    >
+                      🗑️ Delete Chat
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -1610,11 +1690,11 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                   <span className="text-gray-400 block font-mono text-[9px] uppercase tracking-wider">TICKET CLEARANCE:</span>
                   <span className="text-white font-bold block mt-0.5 text-xs uppercase flex items-center space-x-1 truncate">
                     <Sparkles className="w-4 h-4 text-yellow-500 animate-spin flex-shrink-0" />
-                    <span className={(userProfile.isPremium || localStorage.getItem('pp_premium_user_status') === 'true') ? 'text-yellow-400 font-sans font-bold' : 'text-gray-300'}>
-                      {(userProfile.isPremium || localStorage.getItem('pp_premium_user_status') === 'true') ? '🍿 VIP PREMIUM UNLOCKED' : 'FREE USER'}
+                    <span className={isUserPremium() ? 'text-yellow-400 font-sans font-bold' : 'text-gray-300'}>
+                      {isUserPremium() ? '🍿 VIP PREMIUM UNLOCKED' : 'FREE USER'}
                     </span>
                   </span>
-                  {userProfile.premiumUntil && (userProfile.isPremium || localStorage.getItem('pp_premium_user_status') === 'true') && (
+                  {userProfile.premiumUntil && isUserPremium() && (
                     <span className="text-[10px] text-gray-500 block mt-1 font-mono leading-none">
                       Expires: {new Date(userProfile.premiumUntil).toLocaleDateString()}
                     </span>
@@ -1632,7 +1712,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                   }}
                   className="bg-yellow-500 hover:bg-yellow-400 text-black px-4 py-2.5 rounded-xl font-mono text-[10px] font-black uppercase transition-all whitespace-nowrap animate-float"
                 >
-                  {(userProfile.isPremium || localStorage.getItem('pp_premium_user_status') === 'true') ? 'EXTEND VIP' : 'UPGRADE NOW'}
+                  {isUserPremium() ? 'EXTEND VIP' : 'UPGRADE NOW'}
                 </button>
               </div>
 
@@ -2346,6 +2426,42 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
           </div>
         );
       })()}
+
+      {/* Dynamic Inline Confirmation Dialog Modal (Bypasses Sandbox iframe Alert/Confirm blocks) */}
+      {customModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
+          <div className="bg-[#0e0e11] border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl shadow-red-500/5 space-y-4">
+            <div className="flex items-center space-x-2.5 pb-2 border-b border-white/5">
+              <span className="text-sm font-sans font-black text-white uppercase tracking-wider">
+                {customModal.title}
+              </span>
+            </div>
+            
+            <p className="text-xs text-gray-300 leading-relaxed font-sans whitespace-pre-line">
+              {customModal.message}
+            </p>
+
+            <div className="flex justify-end space-x-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setCustomModal(prev => ({ ...prev, isOpen: false }))}
+                className="bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white px-4 py-2 rounded-xl text-xs font-mono transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  customModal.onConfirm();
+                }}
+                className="bg-red-650 hover:bg-red-600 text-white px-5 py-2 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer shadow-lg shadow-red-650/10"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -50,6 +50,7 @@ export interface BannerItem {
   type: 'custom' | 'auto';
   link?: string;
   createdAt?: number;
+  expirationDays?: number;
 }
 
 export interface NotificationItem {
@@ -78,6 +79,7 @@ export interface SupportSession {
   messages: ChatMessage[];
   lastUpdated: string;
   unreadCount?: number;
+  deletedByAdmin?: boolean;
 }
 
 export interface PaymentRequest {
