@@ -360,45 +360,83 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     }
   }, [content, viewingContent?.id]);
 
-  // Keep React userProfile in sync with Firebase Auth state
+  // Synchronize React userProfile with Firebase Auth & Firestore, and handle auto-expiry
   useEffect(() => {
+    let unsubProfile: (() => void) | null = null;
+
     const unsubAuth = subscribeAuth((fbUser) => {
+      // Clean up previous profile sub first
+      if (unsubProfile) {
+        unsubProfile();
+        unsubProfile = null;
+      }
+
       if (fbUser) {
-        // Handled: user is signed in to Firebase Auth. Ensure profile aligns
-        if (!userProfile || userProfile.uid !== fbUser.uid) {
-          const unsubProfile = subscribeUserProfile(fbUser.uid, (freshProfile) => {
-            if (freshProfile) {
+        // User is authenticated via Firebase Auth
+        unsubProfile = subscribeUserProfile(fbUser.uid, (freshProfile) => {
+          if (freshProfile) {
+            // Verify if active subscription has elapsed (expired)
+            if (freshProfile.isPremium && freshProfile.premiumUntil && Date.now() > freshProfile.premiumUntil) {
+              const expiredProfile = { ...freshProfile, isPremium: false, premiumUntil: null };
+              setUserProfile(expiredProfile);
+              updateUserProfile(expiredProfile);
+              triggerAlert("আপনার প্রিমিয়াম সাবস্ক্রিপশন শেষ হয়ে গেছে! আবার কিনতে VIP Upgrade বাটনে ক্লিক করুন।");
+            } else {
               setUserProfile(freshProfile);
               localStorage.setItem('pp_current_user', JSON.stringify(freshProfile));
-            } else {
-              // Dynamically provision profile for active user ifFirestore profile doc has not been written
-              const newProfile: UserProfile = {
-                uid: fbUser.uid,
-                name: fbUser.displayName || fbUser.email?.split('@')[0] || 'Member',
-                email: fbUser.email || '',
-                isPremium: false,
-                favorites: []
-              };
-              setUserProfile(newProfile);
-              localStorage.setItem('pp_current_user', JSON.stringify(newProfile));
-              updateUserProfile(newProfile);
+              if (freshProfile.isPremium) {
+                localStorage.setItem('pp_premium_user_status', 'true');
+                if (freshProfile.premiumUntil) {
+                  localStorage.setItem('pp_premium_until', String(freshProfile.premiumUntil));
+                }
+              } else {
+                localStorage.setItem('pp_premium_user_status', 'false');
+                localStorage.removeItem('pp_premium_until');
+              }
             }
-          });
-          return () => unsubProfile();
-        }
+          } else {
+            // No profile document in Firestore yet - provision it dynamically
+            const newProfile: UserProfile = {
+              uid: fbUser.uid,
+              name: fbUser.displayName || fbUser.email?.split('@')[0] || 'Member',
+              email: fbUser.email || '',
+              isPremium: false,
+              favorites: []
+            };
+            setUserProfile(newProfile);
+            localStorage.setItem('pp_current_user', JSON.stringify(newProfile));
+            updateUserProfile(newProfile); // This creates/merges it in doc('users', uid)
+          }
+        });
       } else {
-        // No authenticated Firebase user. Reset local profile state if it is an online user
-        if (userProfile && !userProfile.uid.startsWith('local-usr-guest-') && !userProfile.uid.startsWith('local-usr-')) {
+        // No authenticated Firebase user.
+        // Check if the current user profile is an online Firebase user and reset it
+        const currentLocal = localStorage.getItem('pp_current_user');
+        let isLocalGuest = true;
+        if (currentLocal) {
+          try {
+            const parsed = JSON.parse(currentLocal);
+            if (parsed && parsed.uid && !parsed.uid.startsWith('local-usr-guest-') && !parsed.uid.startsWith('local-usr-')) {
+              isLocalGuest = false;
+            }
+          } catch (e) {}
+        }
+        if (!isLocalGuest) {
           setUserProfile(null);
           localStorage.removeItem('pp_current_user');
+          localStorage.setItem('pp_premium_user_status', 'false');
+          localStorage.removeItem('pp_premium_until');
         }
       }
     });
 
     return () => {
       unsubAuth();
+      if (unsubProfile) {
+        unsubProfile();
+      }
     };
-  }, [userProfile?.uid]);
+  }, []);
 
   // Sync personal local support sessions
   useEffect(() => {
@@ -407,36 +445,6 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
         setChatSession(session);
       });
       return () => unsubChat();
-    }
-  }, [userProfile?.uid]);
-
-  // Sync and dynamically auto-expire user profile subscription status
-  useEffect(() => {
-    if (userProfile?.uid) {
-      const unsubProfile = subscribeUserProfile(userProfile.uid, (freshProfile) => {
-        if (freshProfile) {
-          // Verify if active subscription has elapsed (expired)
-          if (freshProfile.isPremium && freshProfile.premiumUntil && Date.now() > freshProfile.premiumUntil) {
-            const expiredProfile = { ...freshProfile, isPremium: false, premiumUntil: null };
-            setUserProfile(expiredProfile);
-            updateUserProfile(expiredProfile);
-            triggerAlert("আপনার প্রিমিয়াম সাবস্ক্রিপশন শেষ হয়ে গেছে! আবার কিনতে VIP Upgrade বাটনে ক্লিক করুন।");
-          } else {
-            setUserProfile(freshProfile);
-            localStorage.setItem('pp_current_user', JSON.stringify(freshProfile));
-            if (freshProfile.isPremium) {
-              localStorage.setItem('pp_premium_user_status', 'true');
-              if (freshProfile.premiumUntil) {
-                localStorage.setItem('pp_premium_until', String(freshProfile.premiumUntil));
-              }
-            } else {
-              localStorage.setItem('pp_premium_user_status', 'false');
-              localStorage.removeItem('pp_premium_until');
-            }
-          }
-        }
-      });
-      return () => unsubProfile();
     }
   }, [userProfile?.uid]);
 
@@ -568,6 +576,14 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   // Check locks
   const isUserPremium = () => {
     if (!userProfile) return false;
+
+    // Explicit bypass if admin
+    const adminEmail = settings?.adminEmail?.trim().toLowerCase() || 'admin@popcornplay.com';
+    const cleanEmail = userProfile.email?.trim().toLowerCase();
+    if (cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === adminEmail) {
+      return true;
+    }
+
     if (userProfile.isPremium) {
       if (userProfile.premiumUntil && Date.now() > userProfile.premiumUntil) {
         return false;

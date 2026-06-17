@@ -16,7 +16,7 @@ import {
   subscribeAppSettings, updateAppSettings, subscribePayments, 
   updatePaymentRequestStatus, subscribeAllChatsForAdmin, sendMessage, 
   clearChatSession, deleteChatSession, hideChatFromAdmin, restoreChatFromAdmin, getVisitorStats, saveVisitorStats, sendNotification,
-  deletePaymentRequestByAdmin, modifyPaymentRequestByAdmin, signInWithGoogle,
+  deletePaymentRequestByAdmin, modifyPaymentRequestByAdmin, signInWithGoogle, logOut,
   deleteNotificationItem, updateNotificationItem, subscribeNotifications,
   IS_FIREBASE_REAL,
   subscribeAllUserProfiles, adminUpdateUserProfile, deleteUserProfile,
@@ -942,12 +942,17 @@ export default function AdminPanel() {
     }
   };
 
-  const handleAdminLogout = () => {
+  const handleAdminLogout = async () => {
     setIsAdminLoggedIn(false);
     sessionStorage.removeItem('pp_admin_logged');
     setAdminEmailInput('');
     setAdminPasswordInput('');
-    triggerAlert("Logged out of Admin Panel.");
+    try {
+      await logOut();
+    } catch (e) {
+      console.error("Firebase logout from admin error:", e);
+    }
+    triggerAlert("Logged out of administrative console and Firebase Auth session.");
   };
 
   // Dynamic Payment Methods handlers
