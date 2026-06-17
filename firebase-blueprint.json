@@ -45,11 +45,24 @@
         "schedule": { "type": "string" },
         "description": { "type": "string" },
         "rating": { "type": "number" },
+        "ratingCount": { "type": "number" },
+        "ratingSum": { "type": "number" },
         "status": { "type": "string" },
         "zipUrl": { "type": "string" },
         "episodes": { "type": "array" }
       },
       "required": ["id", "title", "coverUrl", "videoUrl", "tags", "category", "isPremium", "isAdult", "schedule", "description", "rating"]
+    },
+    "UserRating": {
+      "title": "UserRating",
+      "description": "Individual star rating given by a user to a content item.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "rating": { "type": "number" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["userId", "rating", "timestamp"]
     },
     "PaymentRequest": {
       "title": "PaymentRequest",
@@ -108,6 +121,10 @@
     "/content/{contentId}": {
       "schema": "ContentItem",
       "description": "Video catalog content entities."
+    },
+    "/content/{contentId}/ratings/{userId}": {
+      "schema": "UserRating",
+      "description": "Individual title ratings submitted by users."
     },
     "/payments/{paymentId}": {
       "schema": "PaymentRequest",

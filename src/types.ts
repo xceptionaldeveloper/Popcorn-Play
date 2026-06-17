@@ -32,6 +32,8 @@ export interface ContentItem {
   schedule: string; // Day of scheduling (e.g. "Monday", "Weekly")
   description: string;
   rating: number;
+  ratingCount?: number;
+  ratingSum?: number;
   status?: 'ongoing' | 'completed'; // Used for Series
   episodes?: Episode[];              // Episodic content (Anime, Drama, etc.)
   zipUrl?: string;                   // Link for download complete pack

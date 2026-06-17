@@ -139,7 +139,17 @@ service cloud.firestore {
     // Media Catalog items
     match /content/{contentId} {
       allow get, list: if true;
-      allow write: if isAdmin() && isValidContentItem(incoming()) && isValidId(contentId);
+      allow create, delete: if isAdmin() && isValidContentItem(incoming()) && isValidId(contentId);
+      allow update: if isValidContentItem(incoming()) && (
+                      isAdmin() || (
+                        incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'ratingCount', 'ratingSum'])
+                      )
+                    );
+
+      match /ratings/{userId} {
+        allow read: if true;
+        allow write: if (isSignedIn() && isOwner(userId)) || isLocalUser(userId);
+      }
     }
 
     // Billing Subscriptions

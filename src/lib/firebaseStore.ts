@@ -1707,3 +1707,151 @@ export async function deleteUserProfile(uid: string): Promise<void> {
   }
   window.dispatchEvent(new Event('storage'));
 }
+
+export async function submitUserRating(contentId: string, userId: string, ratingValue: number): Promise<void> {
+  const ratingKey = `${contentId}_${userId}`;
+
+  if (IS_FIREBASE_REAL && firebaseDb) {
+    let ratingSnap: any = null;
+    let contentSnap: any = null;
+    const ratingRef = doc(firebaseDb, 'content', contentId, 'ratings', userId);
+    const contentRef = doc(firebaseDb, 'content', contentId);
+
+    try {
+      ratingSnap = await getDoc(ratingRef);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, `content/${contentId}/ratings/${userId}`);
+    }
+
+    try {
+      contentSnap = await getDoc(contentRef);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, `content/${contentId}`);
+    }
+
+    if (contentSnap && contentSnap.exists()) {
+      const contentData = contentSnap.data() as ContentItem;
+      let existingCount = contentData.ratingCount;
+      let existingSum = contentData.ratingSum;
+      
+      // If ratingCount or ratingSum doesn't exist, seed it with the current rating
+      if (existingCount === undefined || existingSum === undefined) {
+        const seedRating = contentData.rating || 0;
+        existingCount = seedRating > 0 ? 1 : 0;
+        existingSum = seedRating;
+      }
+      
+      let isNewVote = true;
+      let oldRating = 0;
+      
+      if (ratingSnap && ratingSnap.exists()) {
+        isNewVote = false;
+        oldRating = ratingSnap.data().rating || 0;
+      }
+      
+      let newCount = existingCount;
+      let newSum = existingSum;
+      
+      if (isNewVote) {
+        newCount += 1;
+        newSum += ratingValue;
+      } else {
+        newSum = existingSum - oldRating + ratingValue;
+      }
+      
+      const newAverage = newCount > 0 ? Number((newSum / newCount).toFixed(1)) : 0;
+      
+      // Update parent content item
+      try {
+        await updateDoc(contentRef, {
+          rating: newAverage,
+          ratingCount: newCount,
+          ratingSum: newSum
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `content/${contentId}`);
+      }
+      
+      // Update individual user rating
+      try {
+        await setDoc(ratingRef, {
+          userId,
+          rating: ratingValue,
+          timestamp: Date.now()
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `content/${contentId}/ratings/${userId}`);
+      }
+    } else if (contentSnap) {
+      throw new Error(`Content item ${contentId} does not exist`);
+    }
+  }
+
+  // Always update locally as well, either for fallback or for keeping local cache sync
+  const currentLocalContent = getLocal('pp_content', DEFAULT_CONTENT) as ContentItem[];
+  const itemIndex = currentLocalContent.findIndex(c => c.id === contentId);
+  const localRatings = getLocal('pp_local_ratings', {}) as Record<string, number>;
+  const oldLocalRating = localRatings[ratingKey];
+  const isNewLocalVote = oldLocalRating === undefined;
+  
+  if (itemIndex > -1) {
+    const item = currentLocalContent[itemIndex];
+    let count = item.ratingCount;
+    let sum = item.ratingSum;
+    
+    if (count === undefined || sum === undefined) {
+      const seedRating = item.rating || 0;
+      count = seedRating > 0 ? 1 : 0;
+      sum = seedRating;
+    }
+    
+    if (isNewLocalVote) {
+      count += 1;
+      sum += ratingValue;
+    } else {
+      sum = sum - oldLocalRating + ratingValue;
+    }
+    
+    item.ratingCount = count;
+    item.ratingSum = sum;
+    item.rating = count > 0 ? Number((sum / count).toFixed(1)) : 0;
+    
+    currentLocalContent[itemIndex] = item;
+    setLocal('pp_content', currentLocalContent);
+  }
+  
+  localRatings[ratingKey] = ratingValue;
+  setLocal('pp_local_ratings', localRatings);
+  
+  // Trigger a storage event to alert other listening tabs or components
+  window.dispatchEvent(new Event('storage'));
+}
+
+export function subscribeUserRating(contentId: string, userId: string, callback: (rating: number | null) => void): () => void {
+  if (IS_FIREBASE_REAL && firebaseDb) {
+    const ratingRef = doc(firebaseDb, 'content', contentId, 'ratings', userId);
+    return onSnapshot(ratingRef, (snapshot) => {
+      if (snapshot.exists()) {
+        callback(snapshot.data().rating || null);
+      } else {
+        callback(null);
+      }
+    }, (error) => {
+      console.error('Error listening to user rating: ', error);
+      handleFirestoreError(error, OperationType.GET, `content/${contentId}/ratings/${userId}`);
+      callback(null);
+    });
+  } else {
+    // Local storage listener
+    const handleStorage = () => {
+      const ratings = getLocal('pp_local_ratings', {}) as Record<string, number>;
+      const key = `${contentId}_${userId}`;
+      callback(ratings[key] || null);
+    };
+    handleStorage();
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
+  }
+}

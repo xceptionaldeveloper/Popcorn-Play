@@ -31,7 +31,7 @@ service cloud.firestore {
     }
 
     function isLocalUser(id) {
-      return id is string && id.size() >= 10 && id[0:10] == "local-usr-";
+      return id is string && id.size() >= 10 && id.matches('^local-usr-.*');
     }
 
     function isValidId(id) {
@@ -151,7 +151,24 @@ service cloud.firestore {
     // Media Catalog items
     match /content/{contentId} {
       allow get, list: if true;
-      allow write: if isAdmin() && isValidContentItem(incoming()) && isValidId(contentId);
+      allow create, delete: if isAdmin() && isValidContentItem(incoming()) && isValidId(contentId);
+      allow update: if (isValidContentItem(incoming()) && isAdmin()) || (
+                      incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'ratingCount', 'ratingSum']) &&
+                      incoming().rating is number &&
+                      incoming().ratingCount is number &&
+                      incoming().ratingSum is number
+                    );
+
+      match /ratings/{userId} {
+        allow read: if true;
+        allow write: if ((isSignedIn() && isOwner(userId)) || isLocalUser(userId)) &&
+                       incoming().keys().hasAll(['userId', 'rating', 'timestamp']) &&
+                       incoming().userId == userId &&
+                       incoming().rating is number &&
+                       incoming().rating >= 1 &&
+                       incoming().rating <= 5 &&
+                       incoming().timestamp is number;
+      }
     }
 
     // Billing Subscriptions

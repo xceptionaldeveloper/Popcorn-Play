@@ -14,7 +14,7 @@ import {
 import { 
   subscribeContent, subscribeAppSettings, subscribeNotifications, subscribeContentFiltered,
   subscribeUserChat, sendMessage, submitPaymentRequest, clearChatSession, deleteChatSession, signInWithGoogle, customSignUp,
-  customSignIn, subscribeUserProfile, updateUserProfile
+  customSignIn, subscribeUserProfile, updateUserProfile, submitUserRating, subscribeUserRating, subscribeAuth, logOut
 } from '../lib/firebaseStore';
 
 // Helper to parse YouTube URLs for embedding
@@ -130,6 +130,12 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
 
   // Local Favorite status helpers
   const [favorites, setFavorites] = useState<string[]>([]);
+
+  // User Ratings UI States
+  const [myCurrentRating, setMyCurrentRating] = useState<number | null>(null);
+  const [hoverRating, setHoverRating] = useState<number | null>(null);
+  const [isRatingSubmitting, setIsRatingSubmitting] = useState(false);
+  const [sortBy, setSortBy] = useState<'latest' | 'popular'>('latest');
 
   // Watchlist & UI Carousel Slider index
   const [carouselIndex, setCarouselIndex] = useState(0);
@@ -344,6 +350,56 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     };
   }, [selectedCategory, selectedSubCategory, searchQuery]);
 
+  // Keep viewingContent up to date with fresh live content catalog updates
+  useEffect(() => {
+    if (viewingContent) {
+      const fresh = content.find(c => c.id === viewingContent.id);
+      if (fresh) {
+        setViewingContent(fresh);
+      }
+    }
+  }, [content, viewingContent?.id]);
+
+  // Keep React userProfile in sync with Firebase Auth state
+  useEffect(() => {
+    const unsubAuth = subscribeAuth((fbUser) => {
+      if (fbUser) {
+        // Handled: user is signed in to Firebase Auth. Ensure profile aligns
+        if (!userProfile || userProfile.uid !== fbUser.uid) {
+          const unsubProfile = subscribeUserProfile(fbUser.uid, (freshProfile) => {
+            if (freshProfile) {
+              setUserProfile(freshProfile);
+              localStorage.setItem('pp_current_user', JSON.stringify(freshProfile));
+            } else {
+              // Dynamically provision profile for active user ifFirestore profile doc has not been written
+              const newProfile: UserProfile = {
+                uid: fbUser.uid,
+                name: fbUser.displayName || fbUser.email?.split('@')[0] || 'Member',
+                email: fbUser.email || '',
+                isPremium: false,
+                favorites: []
+              };
+              setUserProfile(newProfile);
+              localStorage.setItem('pp_current_user', JSON.stringify(newProfile));
+              updateUserProfile(newProfile);
+            }
+          });
+          return () => unsubProfile();
+        }
+      } else {
+        // No authenticated Firebase user. Reset local profile state if it is an online user
+        if (userProfile && !userProfile.uid.startsWith('local-usr-guest-') && !userProfile.uid.startsWith('local-usr-')) {
+          setUserProfile(null);
+          localStorage.removeItem('pp_current_user');
+        }
+      }
+    });
+
+    return () => {
+      unsubAuth();
+    };
+  }, [userProfile?.uid]);
+
   // Sync personal local support sessions
   useEffect(() => {
     if (userProfile?.uid) {
@@ -383,6 +439,30 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
       return () => unsubProfile();
     }
   }, [userProfile?.uid]);
+
+  const getUserIdForRating = () => {
+    if (userProfile?.uid) return userProfile.uid;
+    let cachedGuestId = localStorage.getItem('pp_guest_rating_id');
+    if (!cachedGuestId) {
+      cachedGuestId = 'local-usr-guest-' + Math.random().toString(36).substring(2, 11);
+      localStorage.setItem('pp_guest_rating_id', cachedGuestId);
+    }
+    return cachedGuestId;
+  };
+
+  useEffect(() => {
+    if (!viewingContent) {
+      setMyCurrentRating(null);
+      return;
+    }
+    const currentUserId = getUserIdForRating();
+    const unsub = subscribeUserRating(viewingContent.id, currentUserId, (rating) => {
+      setMyCurrentRating(rating);
+    });
+    return () => {
+      unsub();
+    };
+  }, [viewingContent?.id, userProfile?.uid]);
 
   // Synchronously defaults the active payment method on modal mount
   useEffect(() => {
@@ -460,10 +540,15 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     setAuthName('');
   };
 
-  const handleSignOut = () => {
-    setUserProfile(null);
-    localStorage.removeItem('pp_current_user');
-    triggerAlert("Logged out of POPCORN PLAY.");
+  const handleSignOut = async () => {
+    try {
+      await logOut();
+      setUserProfile(null);
+      localStorage.removeItem('pp_current_user');
+      triggerAlert("Logged out of POPCORN PLAY.");
+    } catch (err: any) {
+      console.error("Signout error:", err);
+    }
   };
 
   // Favorites logic
@@ -581,7 +666,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   };
 
   // Filter content based on Category, Search bar text, and Parental toggles
-  const filteredContent = content.filter((item) => {
+  const unfilteredContent = content.filter((item) => {
     // 1. Parental Lock (Adult 18+)
     if (item.isAdult && !adultEnabled) return false;
 
@@ -605,6 +690,14 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     }
 
     return true;
+  });
+
+  const filteredContent = [...unfilteredContent].sort((a, b) => {
+    if (sortBy === 'popular') {
+      return (b.rating || 0) - (a.rating || 0);
+    }
+    // Default newest items first
+    return (b.createdAt || 0) - (a.createdAt || 0);
   });
 
   const getSubcategoriesForContext = () => {
@@ -1103,7 +1196,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
 
           {/* Primary sorted stream grid */}
           <div>
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
               <div className="flex items-center space-x-3.5">
                 <Tv className="w-5 h-5 text-red-650" />
                 <h3 className="font-display font-extrabold text-xl text-white">
@@ -1114,8 +1207,34 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                 )}
               </div>
               
-              <div className="flex items-center space-x-2 text-xs font-mono text-gray-500">
-                <span>Total dynamic syncs: {filteredContent.length} titles</span>
+              <div className="flex items-center space-x-4 flex-wrap gap-2 text-xs font-mono">
+                {/* Popularity / Sorting toggle */}
+                <div className="flex items-center bg-[#0d0d10] p-1 rounded-xl border border-white/5 space-x-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setSortBy('latest')}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-mono transition-all uppercase cursor-pointer ${
+                      sortBy === 'latest'
+                        ? 'bg-red-650 text-white font-extrabold shadow-sm'
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    Latest
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSortBy('popular')}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-mono transition-all uppercase cursor-pointer ${
+                      sortBy === 'popular'
+                        ? 'bg-red-550 text-white font-extrabold shadow-sm'
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    Popular (জনপ্রিয়)
+                  </button>
+                </div>
+                
+                <span className="text-gray-500">{filteredContent.length} titles</span>
               </div>
             </div>
 
@@ -1312,7 +1431,9 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                 </div>
 
                 <div className="flex items-center space-x-4 flex-wrap gap-y-2">
-                  <span className="text-xs text-amber-500 font-bold">Popcorn Rating: ★{viewingContent.rating}</span>
+                  <span className="text-xs text-amber-500 font-bold">
+                    Popcorn Rating: ★{(viewingContent.rating || 0).toFixed(1)} ({viewingContent.ratingCount || 0} {viewingContent.ratingCount === 1 ? 'vote' : 'votes'})
+                  </span>
                   <span className="text-xs text-gray-400 font-mono">Releases: {viewingContent.schedule}</span>
                   {viewingContent.status && (
                     <span className="text-xs text-green-400 font-medium uppercase font-mono">{viewingContent.status}</span>
@@ -1322,6 +1443,59 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                 <p className="text-xs text-gray-400 font-light leading-relaxed font-sans pt-1 border-t border-white/5">
                   {viewingContent.description}
                 </p>
+
+                {/* Interactive Star Rating Selector */}
+                <div className="pt-3 border-t border-white/5 space-y-2">
+                  <span className="text-[10px] text-gray-500 font-mono uppercase tracking-widest font-bold block">
+                    {myCurrentRating !== null ? 'Your Rating (আপনার রেটিং):' : 'Rate this Title (রেটিং দিন):'}
+                  </span>
+                  
+                  <div className="flex items-center space-x-2">
+                    <div className="flex items-center space-x-1">
+                      {[1, 2, 3, 4, 5].map((star) => {
+                        const isFilled = hoverRating !== null ? star <= hoverRating : (myCurrentRating !== null && star <= myCurrentRating);
+                        return (
+                          <button
+                            key={star}
+                            type="button"
+                            disabled={isRatingSubmitting}
+                            onMouseEnter={() => setHoverRating(star)}
+                            onMouseLeave={() => setHoverRating(null)}
+                            onClick={async () => {
+                              try {
+                                setIsRatingSubmitting(true);
+                                const userId = getUserIdForRating();
+                                await submitUserRating(viewingContent.id, userId, star);
+                                triggerAlert(`Thank you for rating! (${star} Star রেটিং সফল হয়েছে)`);
+                              } catch (err) {
+                                triggerAlert("Failed to submit rating. Please try again.");
+                              } finally {
+                                setIsRatingSubmitting(false);
+                              }
+                            }}
+                            className="p-1 focus:outline-none transition-all duration-200 hover:scale-125 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <span className={`text-2xl transition-colors duration-200 ${
+                              isFilled ? 'text-amber-400 scale-110 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]' : 'text-gray-600 hover:text-amber-350'
+                            }`}>
+                              ★
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    
+                    {myCurrentRating !== null && (
+                      <span className="text-xs text-green-400 font-mono font-medium animate-pulse animate-duration-1000">
+                        ({myCurrentRating} Star Saved)
+                      </span>
+                    )}
+
+                    {isRatingSubmitting && (
+                      <div className="w-3.5 h-3.5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+                    )}
+                  </div>
+                </div>
 
                 {/* Pack Zip download support link */}
                 {viewingContent.zipUrl && (

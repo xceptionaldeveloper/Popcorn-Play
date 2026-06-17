@@ -20,7 +20,7 @@ import {
   deleteNotificationItem, updateNotificationItem, subscribeNotifications,
   IS_FIREBASE_REAL,
   subscribeAllUserProfiles, adminUpdateUserProfile, deleteUserProfile,
-  customSignIn, customSignUp
+  customSignIn, customSignUp, subscribeAuth
 } from '../lib/firebaseStore';
 
 export default function AdminPanel() {
@@ -33,6 +33,7 @@ export default function AdminPanel() {
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
     return sessionStorage.getItem('pp_admin_logged') === 'true';
   });
+  const [currentAuthUser, setCurrentAuthUser] = useState<any>(null);
   const [adminEmailInput, setAdminEmailInput] = useState('');
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -241,16 +242,46 @@ export default function AdminPanel() {
   const [ledgerSearch, setLedgerSearch] = useState('');
 
   useEffect(() => {
+    const unsubAuth = subscribeAuth((user) => {
+      setCurrentAuthUser(user);
+    });
+    return () => {
+      unsubAuth();
+    };
+  }, []);
+
+  // Monitor auth user to ensure if a regular non-admin user logs in on the viewer side,
+  // we do not falsely treat them as admin on the operator panel (which raises firebase permission denied errors).
+  useEffect(() => {
+    if (IS_FIREBASE_REAL && currentAuthUser) {
+      const correctEmail = settings?.adminEmail?.trim() || 'admin@popcornplay.com';
+      const isUserAdmin = currentAuthUser.email === 'mdikhlas098@gmail.com' || 
+                          currentAuthUser.email?.toLowerCase().trim() === correctEmail.toLowerCase().trim();
+      
+      if (!isUserAdmin) {
+        // If the logged-in user is not a real admin, turn off admin access in the client
+        setIsAdminLoggedIn(false);
+        sessionStorage.setItem('pp_admin_logged', 'false');
+      }
+    }
+  }, [currentAuthUser, settings?.adminEmail]);
+
+  useEffect(() => {
     // Subscriptions
     const unsubContent = subscribeContent((items) => setContent(items));
     const unsubSettings = subscribeAppSettings((conf) => setSettings(conf));
     
-    // Only subscribe to administrative database listeners if Admin is logged in to avoid unauthenticated permission checks
+    // Only subscribe to administrative database listeners if Admin is logged in AND verified as real admin in firebase to avoid unauthenticated permission checks
     let unsubPayments = () => {};
     let unsubChats = () => {};
     let unsubUsers = () => {};
     
-    if (isAdminLoggedIn) {
+    const isAuthenticAdmin = !IS_FIREBASE_REAL || (currentAuthUser && (
+      currentAuthUser.email === 'mdikhlas098@gmail.com' || 
+      currentAuthUser.email?.toLowerCase().trim() === (settings?.adminEmail || 'admin@popcornplay.com').toLowerCase().trim()
+    ));
+
+    if (isAdminLoggedIn && isAuthenticAdmin) {
       unsubPayments = subscribePayments((pays) => setPayments(pays));
       unsubChats = subscribeAllChatsForAdmin((chats) => setChatSessions(chats));
       unsubUsers = subscribeAllUserProfiles((profiles) => setAllUsersList(profiles));
@@ -267,7 +298,7 @@ export default function AdminPanel() {
       unsubNotifications();
       unsubUsers();
     };
-  }, [isAdminLoggedIn]);
+  }, [isAdminLoggedIn, currentAuthUser, settings?.adminEmail]);
 
   const triggerAlert = (msg: string) => {
     setAlertBanner(msg);
