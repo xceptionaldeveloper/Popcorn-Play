@@ -76,13 +76,7 @@ export default function AdminPanel() {
   const [movieFilter, setMovieFilter] = useState('');
 
   // Dynamic categories input state
-  const [newCatInputs, setNewCatInputs] = useState<{
-    Movies: string;
-    Anime: string;
-    Drama: string;
-    Cartoon: string;
-    Serial: string;
-  }>({
+  const [newCatInputs, setNewCatInputs] = useState<Record<string, string>>({
     Movies: '',
     Anime: '',
     Drama: '',
@@ -238,7 +232,7 @@ export default function AdminPanel() {
   const [editUserPremiumDays, setEditUserPremiumDays] = useState(30);
 
   // Modern VIP subscription moderation states
-  const [ledgerFilter, setLedgerFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [ledgerFilter, setLedgerFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'expired'>('pending');
   const [ledgerSearch, setLedgerSearch] = useState('');
 
   useEffect(() => {
@@ -326,7 +320,9 @@ export default function AdminPanel() {
     e.preventDefault();
     if (!movieForm.title) return;
     
+    const existing = movieForm.id ? content.find(c => c.id === movieForm.id) : null;
     const item: ContentItem = {
+      ...existing,
       id: movieForm.id || 'mov-' + Date.now().toString(36),
       title: movieForm.title,
       coverUrl: movieForm.coverUrl || 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?auto=format&fit=crop&w=600&q=80',
@@ -339,7 +335,9 @@ export default function AdminPanel() {
       isAdult: movieForm.isAdult || false,
       schedule: movieForm.schedule || 'Released',
       description: movieForm.description || 'No description provided.',
-      rating: Number(movieForm.rating) || 8.0
+      rating: existing && existing.ratingCount !== undefined && existing.ratingCount > 0
+        ? existing.rating
+        : (Number(movieForm.rating) || 8.0)
     };
 
     await saveContentItem(item);
@@ -390,7 +388,9 @@ export default function AdminPanel() {
     e.preventDefault();
     if (!seriesForm.title) return;
 
+    const existing = seriesForm.id ? content.find(c => c.id === seriesForm.id) : null;
     const item: ContentItem = {
+      ...existing,
       id: seriesForm.id || 'ser-' + Date.now().toString(36),
       title: seriesForm.title,
       coverUrl: seriesForm.coverUrl || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?auto=format&fit=crop&w=600&q=80',
@@ -401,7 +401,9 @@ export default function AdminPanel() {
       isAdult: seriesForm.isAdult || false,
       schedule: seriesForm.schedule || 'Monday',
       description: seriesForm.description || 'No description.',
-      rating: Number(seriesForm.rating) || 8.0,
+      rating: existing && existing.ratingCount !== undefined && existing.ratingCount > 0
+        ? existing.rating
+        : (Number(seriesForm.rating) || 8.0),
       status: seriesForm.status || 'ongoing',
       zipUrl: seriesForm.zipUrl || '',
       episodes: seriesForm.episodes || []
@@ -513,12 +515,28 @@ export default function AdminPanel() {
   };
 
   // Category Configuration controllers
-  const handleAddCategory = async (type: 'Movies' | 'Anime' | 'Drama' | 'Cartoon' | 'Serial') => {
-    const rawVal = newCatInputs[type].trim();
+  const getDefaultCategoriesForType = (type: string): string[] => {
+    const defaults: Record<string, string[]> = {
+      'All Themes': [
+        'Action', 'Romance', '18+ content', 'Thriller', 'Comedy', 'Sci-Fi', 'Horror',
+        'Bollywood', 'Dhallywood', 'Fantasy', 'Shounen', 'Slice of Life', 'Isekai',
+        'Adventure', 'Mystery', 'Family', 'Crime', 'Romantic Comedy', 'Kids', 'Drama'
+      ],
+      Movies: ['Action', 'Romance', '18+ content', 'Thriller', 'Comedy', 'Sci-Fi', 'Horror', 'Bollywood', 'Dhallywood'],
+      Anime: ['Action', 'Romance', '18+ content', 'Fantasy', 'Shounen', 'Slice of Life', 'Isekai', 'Adventure', 'Mystery'],
+      Drama: ['Action', 'Romance', '18+ content', 'Comedy', 'Family', 'Thriller', 'Crime', 'Romantic Comedy'],
+      Cartoon: ['Action', 'Romance', '18+ content', 'Adventure', 'Comedy', 'Family', 'Kids', 'Fantasy'],
+      Serial: ['Action', 'Romance', '18+ content', 'Drama', 'Comedy', 'Thriller', 'Sci-Fi', 'Mystery']
+    };
+    return defaults[type] || ['Action', 'Romance', '18+ content', 'Thriller', 'Comedy', 'Sci-Fi'];
+  };
+
+  const handleAddCategory = async (type: string) => {
+    const rawVal = (newCatInputs[type] || '').trim();
     if (!rawVal || !settings) return;
     
     // Ensure we don't have duplicated entries
-    const currentCats = settings.customCategories?.[type] || [];
+    const currentCats = settings.customCategories?.[type] || getDefaultCategoriesForType(type);
     if (currentCats.some(c => c.toLowerCase() === rawVal.toLowerCase())) {
       triggerAlert(`Category "${rawVal}" already exists in ${type}!`);
       return;
@@ -545,13 +563,13 @@ export default function AdminPanel() {
     }
   };
 
-  const handleDeleteCategory = (type: 'Movies' | 'Anime' | 'Drama' | 'Cartoon' | 'Serial', catToDelete: string) => {
+  const handleDeleteCategory = (type: string, catToDelete: string) => {
     if (!settings) return;
     showConfirm(
       "Confirm Deletion",
       `Are you sure you want to delete category "${catToDelete}" from ${type}? It will be removed from future selection guides.`,
       async () => {
-        const currentCats = settings.customCategories?.[type] || [];
+        const currentCats = settings.customCategories?.[type] || getDefaultCategoriesForType(type);
         const updatedCats = {
           ...settings.customCategories,
           [type]: currentCats.filter(c => c !== catToDelete)
@@ -574,7 +592,7 @@ export default function AdminPanel() {
     );
   };
 
-  const handleEditCategory = (type: 'Movies' | 'Anime' | 'Drama' | 'Cartoon' | 'Serial', oldCat: string) => {
+  const handleEditCategory = (type: string, oldCat: string) => {
     if (!settings) return;
     showPrompt(
       "Rename Category",
@@ -589,7 +607,7 @@ export default function AdminPanel() {
         }
         if (trimmed.toLowerCase() === oldCat.toLowerCase()) return;
 
-        const currentCats = settings.customCategories?.[type] || [];
+        const currentCats = settings.customCategories?.[type] || getDefaultCategoriesForType(type);
         if (currentCats.some(c => c.toLowerCase() === trimmed.toLowerCase())) {
           triggerAlert(`Category "${trimmed}" already exists in ${type}!`);
           return;
@@ -617,23 +635,15 @@ export default function AdminPanel() {
     );
   };
 
-  const handleResetCategories = (type: 'Movies' | 'Anime' | 'Drama' | 'Cartoon' | 'Serial') => {
+  const handleResetCategories = (type: string) => {
     if (!settings) return;
     showConfirm(
       "Reset Categories",
       `Reset all ${type} categories to default preset list?`,
       async () => {
-        const defaults: Record<'Movies' | 'Anime' | 'Drama' | 'Cartoon' | 'Serial', string[]> = {
-          Movies: ['Action', 'Romance', '18+ content', 'Thriller', 'Comedy', 'Sci-Fi', 'Horror', 'Bollywood', 'Dhallywood'],
-          Anime: ['Action', 'Romance', '18+ content', 'Fantasy', 'Shounen', 'Slice of Life', 'Isekai', 'Adventure', 'Mystery'],
-          Drama: ['Action', 'Romance', '18+ content', 'Comedy', 'Family', 'Thriller', 'Crime', 'Romantic Comedy'],
-          Cartoon: ['Action', 'Romance', '18+ content', 'Adventure', 'Comedy', 'Family', 'Kids', 'Fantasy'],
-          Serial: ['Action', 'Romance', '18+ content', 'Drama', 'Comedy', 'Thriller', 'Sci-Fi', 'Mystery']
-        };
-        
         const updatedCats = {
           ...settings.customCategories,
-          [type]: defaults[type]
+          [type]: getDefaultCategoriesForType(type)
         };
         
         const nextSettings = {
@@ -648,6 +658,123 @@ export default function AdminPanel() {
         } catch (err: any) {
           console.error(err);
           triggerAlert("Resetting categories failed! Ensure you are logged in and authorized.");
+        }
+      }
+    );
+  };
+
+  const handleAddMainCategory = async (catName: string) => {
+    const trimmed = catName.trim();
+    if (!trimmed || !settings) return;
+    const currentList = settings.mainCategories || ['Movies', 'Anime', 'Drama', 'Cartoon', 'Serial'];
+    if (currentList.some(c => c.toLowerCase() === trimmed.toLowerCase())) {
+      triggerAlert(`Category "${trimmed}" already exists.`);
+      return;
+    }
+    const newList = [...currentList, trimmed];
+    const updatedCats = {
+      ...settings.customCategories,
+      [trimmed]: ['Action', 'Romance', '18+ content', 'Thriller', 'Comedy', 'Sci-Fi']
+    };
+    const nextSettings = {
+      ...settings,
+      mainCategories: newList,
+      customCategories: updatedCats
+    };
+    try {
+      setSettings(nextSettings);
+      await updateAppSettings(nextSettings);
+      triggerAlert(`Successfully added "${trimmed}" category.`);
+    } catch (e) {
+      console.error(e);
+      triggerAlert("Failed to add category.");
+    }
+  };
+
+  const handleDeleteMainCategory = async (catToDelete: string) => {
+    if (!settings) return;
+    showConfirm(
+      "Confirm Category Delete",
+      `Are you sure you want to delete the main category "${catToDelete}"? Important: content items under this category won't be visible unless reassigned!`,
+      async () => {
+        const currentList = settings.mainCategories || ['Movies', 'Anime', 'Drama', 'Cartoon', 'Serial'];
+        const newList = currentList.filter(c => c !== catToDelete);
+        
+        const updatedCats = { ...settings.customCategories };
+        delete updatedCats[catToDelete];
+
+        const nextSettings = {
+          ...settings,
+          mainCategories: newList,
+          customCategories: updatedCats
+        };
+        try {
+          setSettings(nextSettings);
+          await updateAppSettings(nextSettings);
+          triggerAlert(`Successfully deleted "${catToDelete}".`);
+        } catch (e) {
+          console.error(e);
+          triggerAlert("Failed to delete category.");
+        }
+      }
+    );
+  };
+
+  const handleEditMainCategory = async (oldCatName: string) => {
+    if (!settings) return;
+    showPrompt(
+      "Rename Main Category",
+      `Rename main category "${oldCatName}" to:`,
+      "Enter new category name",
+      oldCatName,
+      async (newName) => {
+        const trimmed = newName.trim();
+        if (!trimmed) {
+          triggerAlert("Name cannot be empty.");
+          return;
+        }
+        if (trimmed.toLowerCase() === oldCatName.toLowerCase()) return;
+        const currentList = settings.mainCategories || ['Movies', 'Anime', 'Drama', 'Cartoon', 'Serial'];
+        if (currentList.some(c => c.toLowerCase() === trimmed.toLowerCase())) {
+          triggerAlert(`Category "${trimmed}" already exists.`);
+          return;
+        }
+
+        const newList = currentList.map(c => c === oldCatName ? trimmed : c);
+        
+        const updatedCats = { ...settings.customCategories };
+        if (updatedCats[oldCatName]) {
+          updatedCats[trimmed] = updatedCats[oldCatName];
+          delete updatedCats[oldCatName];
+        } else {
+          updatedCats[trimmed] = ['Action', 'Romance', '18+ content', 'Thriller', 'Comedy', 'Sci-Fi'];
+        }
+
+        const nextSettings = {
+          ...settings,
+          mainCategories: newList,
+          customCategories: updatedCats
+        };
+
+        try {
+          setSettings(nextSettings);
+          await updateAppSettings(nextSettings);
+
+          const affectedContent = content.filter(c => c.category === oldCatName);
+          if (affectedContent.length > 0) {
+            triggerAlert(`Renaming category settings... Now updating ${affectedContent.length} associated content items in database.`);
+            for (const item of affectedContent) {
+              await saveContentItem({
+                ...item,
+                category: trimmed
+              });
+            }
+          }
+
+          triggerAlert(`Successfully renamed main category "${oldCatName}" to "${trimmed}" and updated affected content.`);
+        } catch (e) {
+          console.error(e);
+          triggerAlert("Failed to rename category.");
         }
       }
     );
@@ -2154,13 +2281,13 @@ export default function AdminPanel() {
                 <span>{seriesForm.id ? "Edit Series Pack" : "Create Episodic Series Record"}</span>
               </h3>
 
-              <div className="grid grid-cols-4 gap-2 mb-4 bg-black/40 border border-white/5 rounded-xl p-1">
-                {['Anime', 'Cartoon', 'Drama', 'Serial'].map((cat) => (
+              <div className="flex flex-wrap gap-1.5 mb-4 bg-black/40 border border-white/5 rounded-xl p-1.5">
+                {(settings?.mainCategories || ['Anime', 'Cartoon', 'Drama', 'Serial']).map((cat) => (
                   <button
                     key={cat}
                     type="button"
-                    onClick={() => setSeriesCategory(cat as any)}
-                    className={`text-[10px] font-semibold py-2.5 rounded-lg transition-all ${seriesCategory === cat ? 'bg-red-600 text-white shadow-md' : 'text-gray-400 hover:text-white'}`}
+                    onClick={() => setSeriesCategory(cat)}
+                    className={`text-[10px] font-mono leading-none tracking-tight font-extrabold px-3.5 py-2.5 rounded-lg transition-all cursor-pointer ${seriesCategory === cat ? 'bg-red-650 text-white shadow-lg font-black' : 'text-gray-400 hover:text-white hover:bg-white/[0.03]'}`}
                   >
                     {cat}
                   </button>
@@ -2302,12 +2429,9 @@ export default function AdminPanel() {
                   <div className="mt-3 bg-white/[0.02] border border-white/5 rounded-2xl p-4.5">
                     <span className="text-[10px] text-gray-400 font-mono uppercase tracking-wider block mb-2">🏷️ Quick Select {seriesCategory} Categories (Dynamic):</span>
                     <div className="flex flex-wrap gap-1.5">
-                      {(settings?.customCategories?.[seriesCategory] || 
-                        (seriesCategory === 'Anime' ? ['Action', 'Romance', '18+ content', 'Fantasy', 'Shounen', 'Slice of Life', 'Isekai', 'Adventure', 'Mystery'] :
-                         seriesCategory === 'Drama' ? ['Action', 'Romance', '18+ content', 'Comedy', 'Family', 'Thriller', 'Crime', 'Romantic Comedy'] :
-                         seriesCategory === 'Cartoon' ? ['Action', 'Romance', '18+ content', 'Adventure', 'Comedy', 'Family', 'Kids', 'Fantasy'] :
-                         seriesCategory === 'Serial' ? ['Action', 'Romance', '18+ content', 'Drama', 'Comedy', 'Thriller', 'Sci-Fi', 'Mystery'] : []
-                        )
+                      {(settings?.customCategories?.[seriesCategory] && settings.customCategories[seriesCategory]!.length > 0
+                        ? settings.customCategories[seriesCategory]!
+                        : ['Action', 'Romance', '18+ content', 'Thriller', 'Comedy', 'Sci-Fi']
                       ).map((cat) => {
                         const isSelected = (seriesForm.tags || []).includes(cat);
                         return (
@@ -3305,6 +3429,21 @@ export default function AdminPanel() {
                   { value: 'pending', label: 'Pending Verification', count: payments.filter(p => p.status === 'pending').length, badgeColor: 'bg-yellow-500 text-black' },
                   { value: 'approved', label: 'Approved VIPs', count: payments.filter(p => p.status === 'approved').length, badgeColor: 'bg-emerald-500 text-white' },
                   { value: 'rejected', label: 'Rejected Orders', count: payments.filter(p => p.status === 'rejected').length, badgeColor: 'bg-red-500 text-white' },
+                  { value: 'expired', label: 'Expired VIPs ⚠️', count: allUsersList.filter(u => {
+                      if (!u.premiumUntil) return false;
+                      try {
+                        const val = u.premiumUntil;
+                        let ms = 0;
+                        if (typeof val === 'number') ms = val;
+                        else if (typeof val === 'string') ms = Date.parse(val);
+                        else if (val && (val as any).seconds) ms = (val as any).seconds * 1000;
+                        else if (val && (val as any).toDate) ms = (val as any).toDate().getTime();
+                        else ms = Number(val);
+                        return !isNaN(ms) && ms < Date.now();
+                      } catch (err) {
+                        return false;
+                      }
+                    }).length, badgeColor: 'bg-orange-500 text-black' },
                   { value: 'all', label: 'All Ledgers', count: payments.length, badgeColor: 'bg-gray-700 text-gray-300' }
                 ].map((tab) => {
                   const isActive = ledgerFilter === tab.value;
@@ -3329,6 +3468,143 @@ export default function AdminPanel() {
 
               {/* Table ledger body */}
               {(() => {
+                const isUserVIPExpired = (u: UserProfile) => {
+                  if (!u.premiumUntil) return false;
+                  try {
+                    const val = u.premiumUntil;
+                    let ms = 0;
+                    if (typeof val === 'number') {
+                      ms = val;
+                    } else if (typeof val === 'string') {
+                      ms = Date.parse(val);
+                    } else if (val && (val as any).seconds) {
+                      ms = (val as any).seconds * 1000;
+                    } else if (val && (val as any).toDate) {
+                      ms = (val as any).toDate().getTime();
+                    } else {
+                      ms = Number(val);
+                    }
+                    return !isNaN(ms) && ms < Date.now();
+                  } catch (err) {
+                    return false;
+                  }
+                };
+
+                if (ledgerFilter === 'expired') {
+                  const expiredUsers = allUsersList.filter((u) => {
+                    if (!isUserVIPExpired(u)) return false;
+                    if (ledgerSearch.trim() !== '') {
+                      const term = ledgerSearch.toLowerCase();
+                      const name = (u.name || u.displayName || '').toLowerCase();
+                      const email = (u.email || '').toLowerCase();
+                      return name.includes(term) || email.includes(term);
+                    }
+                    return true;
+                  });
+
+                  if (expiredUsers.length === 0) {
+                    return (
+                      <div className="text-center py-20 bg-[#08080a] border border-white/5 rounded-2xl">
+                        <AlertCircle className="w-10 h-10 text-gray-600 mx-auto mb-2" />
+                        <p className="text-xs text-gray-500 font-mono">No expired subscribers matching search constraints are currently logged.</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="overflow-x-auto animate-fadeIn">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b border-white/5 text-gray-500 font-mono">
+                            <th className="pb-3 px-3">Subscriber Name</th>
+                            <th className="pb-3 px-3">Gmail Address</th>
+                            <th className="pb-3 px-3 text-center">Expired Date (UTC / Local)</th>
+                            <th className="pb-3 px-3 text-center">Overdue Duration</th>
+                            <th className="pb-3 px-3 text-center">Subscription Status</th>
+                            <th className="pb-3 px-3 text-right">Quick Subscription Management</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {expiredUsers.map((u) => {
+                            let expSecs = 0;
+                            try {
+                              const v = u.premiumUntil;
+                              if (typeof v === 'number') expSecs = v;
+                              else if (typeof v === 'string') expSecs = Date.parse(v);
+                              else if (v && (v as any).seconds) expSecs = (v as any).seconds * 1000;
+                              else if (v && (v as any).toDate) expSecs = (v as any).toDate().getTime();
+                              else expSecs = Number(v);
+                            } catch (e) {}
+
+                            const expDate = new Date(expSecs);
+                            const now = new Date();
+                            const elapsedMs = now.getTime() - expSecs;
+                            const elapsedDays = Math.max(1, Math.floor(elapsedMs / (1000 * 60 * 60 * 24)));
+
+                            return (
+                              <tr key={u.uid} className="border-b border-white/5 hover:bg-white/[0.01] transition-all">
+                                <td className="py-4.5 px-3 font-medium text-white">
+                                  <div className="font-sans font-bold leading-tight">{u.name || u.displayName || 'Unnamed Subscriber'}</div>
+                                  <span className="text-[9px] text-gray-500 font-mono block mt-0.5">UID: {u.uid}</span>
+                                </td>
+                                <td className="py-4.5 px-3 font-mono text-gray-300 font-bold select-all">{u.email}</td>
+                                <td className="py-4.5 px-3 text-center">
+                                  <div className="font-mono text-xs text-red-400 font-extrabold select-all">
+                                    {expDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                                  </div>
+                                  <span className="text-[9px] text-gray-500 font-mono block">
+                                    {expDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </td>
+                                <td className="py-4.5 px-3 text-center font-mono text-xs text-gray-400 font-bold">
+                                  {elapsedDays} Days Ago
+                                </td>
+                                <td className="py-4.5 px-3 text-center">
+                                  <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-3 py-1 rounded-full text-[10px] font-mono font-medium select-none">
+                                    <AlertCircle className="w-3 h-3" />
+                                    <span>EXPIRED</span>
+                                  </span>
+                                </td>
+                                <td className="py-4.5 px-3 text-right">
+                                  <div className="flex items-center justify-end space-x-1.5">
+                                    <button
+                                      onClick={async () => {
+                                        const daysStr = window.prompt(`Promote ${u.name || u.email} to Premium again. Enter duration in days:`, "30");
+                                        if (daysStr) {
+                                          const days = parseInt(daysStr, 10);
+                                          if (!isNaN(days) && days > 0) {
+                                            const exp = Date.now() + days * 24 * 60 * 60 * 1000;
+                                            try {
+                                              await adminUpdateUserProfile({
+                                                ...u,
+                                                isPremium: true,
+                                                premiumUntil: exp
+                                              });
+                                              triggerAlert(`Successfully renewed "${u.name || u.email}" for ${days} days.`);
+                                            } catch (err) {
+                                              console.error(err);
+                                              triggerAlert("Could not renew user.");
+                                            }
+                                          } else {
+                                            triggerAlert("Invalid days duration.");
+                                          }
+                                        }
+                                      }}
+                                      className="bg-emerald-500 border border-emerald-650 hover:bg-emerald-600 text-white font-mono font-bold px-3 py-1.5 rounded-xl text-[10px] uppercase shadow transition-all cursor-pointer"
+                                    >
+                                      Renew VIP
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                }
+
                 const filteredPayments = payments.filter((p) => {
                   if (ledgerFilter !== 'all' && p.status !== ledgerFilter) return false;
                   if (ledgerSearch.trim() !== '') {
@@ -3960,6 +4236,93 @@ export default function AdminPanel() {
         {/* 7. DYNAMIC CATEGORIES MANAGEMENT */}
         {activeTab === 'categories' && (
           <div className="space-y-6">
+            {/* MAIN CATALOG CHANNELS CMS CARD */}
+            <div className="glass p-8 rounded-3xl">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-2">
+                <div>
+                  <h3 className="font-display font-extrabold text-white text-lg">Main Catalog Channels (All Category)</h3>
+                  <p className="text-gray-400 text-xs leading-relaxed mt-1">
+                    Add, edit, or delete the major content directories available to viewers. Renaming a main category will also automatically update all associated movies and shows dynamically in the database!
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (window.confirm("Are you sure you want to restore the main channels to the default set (Movies, Anime, Drama, Cartoon, Serial)?")) {
+                      const next = {
+                        ...settings,
+                        mainCategories: ['Movies', 'Anime', 'Drama', 'Cartoon', 'Serial']
+                      };
+                      setSettings(next);
+                      await updateAppSettings(next);
+                      triggerAlert("Restored main channels to system defaults.");
+                    }
+                  }}
+                  className="bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white px-3.5 py-2 rounded-xl text-[10px] font-mono font-bold tracking-wider transition-all"
+                >
+                  RESTORE DEFAULTS
+                </button>
+              </div>
+
+              {/* Add New Channel form */}
+              <div className="flex flex-col sm:flex-row gap-3 bg-black/30 border border-white/5 p-4 rounded-2xl mb-6">
+                <div className="flex-1">
+                  <input
+                    id="new-main-cat-input"
+                    type="text"
+                    placeholder="Enter new channel name (e.g. Web Series, Sports, Music)"
+                    className="w-full bg-black/40 border border-white/5 focus:border-red-500 focus:outline-none rounded-xl px-4 py-2.5 text-xs text-white"
+                  />
+                </div>
+                <button
+                  onClick={() => {
+                    const el = document.getElementById('new-main-cat-input') as HTMLInputElement;
+                    if (el && el.value.trim()) {
+                      handleAddMainCategory(el.value.trim());
+                      el.value = '';
+                    } else {
+                      triggerAlert("Please enter a category name first.");
+                    }
+                  }}
+                  className="bg-red-650 hover:bg-red-600 text-white font-mono font-bold text-xs px-6 py-2.5 rounded-xl transition-all"
+                >
+                  ADD NEW CHANNEL
+                </button>
+              </div>
+
+              {/* Grid of existing channels */}
+              {settings && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {(settings.mainCategories || ['Movies', 'Anime', 'Drama', 'Cartoon', 'Serial']).map((cat) => {
+                    const itemsCount = content.filter(c => c.category === cat).length;
+                    return (
+                      <div key={cat} className="bg-white/5 border border-white/5 p-4 rounded-2xl flex items-center justify-between">
+                        <div>
+                          <span className="text-white font-sans font-bold text-sm block">{cat}</span>
+                          <span className="text-[10px] text-gray-400 font-mono block mt-1">{itemsCount} database items associated</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => handleEditMainCategory(cat)}
+                            className="bg-yellow-500/10 hover:bg-yellow-500 text-yellow-500 hover:text-black p-2 rounded-xl text-xs transition-all cursor-pointer"
+                            title="Rename channel"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteMainCategory(cat)}
+                            className="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white p-2 rounded-xl text-xs transition-all cursor-pointer"
+                            title="Delete channel"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             <div className="glass p-8 rounded-3xl">
               <h3 className="font-display font-extrabold text-white text-lg mb-2">Category & Genre Settings</h3>
               <p className="text-gray-400 text-xs leading-relaxed mb-6">
@@ -3968,14 +4331,14 @@ export default function AdminPanel() {
 
               {settings && (
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                  {(['Movies', 'Anime', 'Drama', 'Cartoon', 'Serial'] as const).map((type) => {
+                  {['All Themes', ...(settings.mainCategories || ['Movies', 'Anime', 'Drama', 'Cartoon', 'Serial'])].map((type) => {
                     const savedCats = settings.customCategories?.[type] || [];
                     const count = savedCats.length;
                     return (
                       <div key={type} className="bg-white/5 border border-white/5 rounded-2xl p-5 space-y-4">
                         <div className="flex justify-between items-center pb-2 border-b border-white/5">
                           <span className="text-sm font-sans font-extrabold text-white uppercase tracking-wider">
-                            🎬 {type} Categories ({count})
+                            {type === 'All Themes' ? '🌐' : '🎬'} {type} Categories ({count})
                           </span>
                           <button
                             onClick={() => handleResetCategories(type)}
@@ -3990,7 +4353,7 @@ export default function AdminPanel() {
                           <input
                             type="text"
                             placeholder={`New category (e.g. 18+ content, Comedy)`}
-                            value={newCatInputs[type]}
+                            value={newCatInputs[type] || ''}
                             onChange={(e) => setNewCatInputs({ ...newCatInputs, [type]: e.target.value })}
                             onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddCategory(type))}
                             className="flex-1 bg-black/40 border border-white/5 focus:border-red-500 focus:outline-none rounded-xl px-3 py-2 text-xs text-white"
@@ -4525,14 +4888,12 @@ export default function AdminPanel() {
                         <label className="text-[10px] text-gray-400 font-mono block mb-1">Category Route Filtering</label>
                         <select
                           value={newBannerCategory}
-                          onChange={(e) => setNewBannerCategory(e.target.value as ContentCategory)}
+                          onChange={(e) => setNewBannerCategory(e.target.value)}
                           className="w-full bg-[#101012] border border-white/5 focus:border-red-500 focus:outline-none rounded-xl px-3 py-2.5 text-xs text-white text-gray-300"
                         >
-                          <option value="Movies">standalone Movies</option>
-                          <option value="Anime">Anime Series</option>
-                          <option value="Drama">Korean / Bangla Dramas</option>
-                          <option value="Cartoon">Kids Cartoons</option>
-                          <option value="Serial">Web Series Collections</option>
+                          {(settings?.mainCategories || ['Movies', 'Anime', 'Drama', 'Cartoon', 'Serial']).map((cat) => (
+                            <option key={cat} value={cat}>{cat} Channel</option>
+                          ))}
                         </select>
                       </div>
                       <div>

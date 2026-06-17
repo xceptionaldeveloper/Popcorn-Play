@@ -857,16 +857,47 @@ export async function saveContentItem(item: ContentItem) {
   const existingIndex = current.findIndex(c => c.id === item.id);
   
   const now = Date.now();
-  const isNew = existingIndex === -1;
+  let isActuallyNew = existingIndex === -1;
+  let finalCreatedAt = now;
+  let finalRatingSum = item.ratingSum;
+  let finalRatingCount = item.ratingCount;
+  let finalRating = item.rating;
+
+  if (IS_FIREBASE_REAL && firebaseDb) {
+    try {
+      const existingSnap = await getDoc(doc(firebaseDb, 'content', item.id));
+      if (existingSnap.exists()) {
+        isActuallyNew = false;
+        const existingData = existingSnap.data() as ContentItem;
+        finalCreatedAt = existingData.createdAt || now;
+        if (finalRatingSum === undefined) finalRatingSum = existingData.ratingSum;
+        if (finalRatingCount === undefined) finalRatingCount = existingData.ratingCount;
+        if (finalRating === undefined || finalRating === 8.0 || finalRating === 8.5) {
+          finalRating = existingData.rating !== undefined ? existingData.rating : (item.rating || 8.0);
+        }
+      }
+    } catch (e) {
+      console.error("Error reading existing document during save:", e);
+    }
+  } else if (existingIndex > -1) {
+    const oldItem = current[existingIndex];
+    finalCreatedAt = oldItem.createdAt || now;
+    if (finalRatingSum === undefined) finalRatingSum = oldItem.ratingSum;
+    if (finalRatingCount === undefined) finalRatingCount = oldItem.ratingCount;
+    if (finalRating === undefined || finalRating === 8.0 || finalRating === 8.5) {
+      finalRating = oldItem.rating !== undefined ? oldItem.rating : (item.rating || 8.0);
+    }
+  }
+
+  item.createdAt = finalCreatedAt;
+  item.updatedAt = now;
+  if (finalRatingSum !== undefined) item.ratingSum = finalRatingSum;
+  if (finalRatingCount !== undefined) item.ratingCount = finalRatingCount;
+  if (finalRating !== undefined) item.rating = finalRating;
 
   if (existingIndex > -1) {
-    const oldItem = current[existingIndex];
-    item.createdAt = oldItem.createdAt || now;
-    item.updatedAt = now;
     current[existingIndex] = item;
   } else {
-    item.createdAt = now;
-    item.updatedAt = now;
     current.push(item);
   }
   setLocal('pp_content', current);
@@ -875,13 +906,13 @@ export async function saveContentItem(item: ContentItem) {
     try {
       await setDoc(doc(firebaseDb, 'content', item.id), item);
     } catch (error) {
-      const op = existingIndex > -1 ? OperationType.UPDATE : OperationType.CREATE;
+      const op = !isActuallyNew ? OperationType.UPDATE : OperationType.CREATE;
       handleFirestoreError(error, op, `content/${item.id}`);
     }
   }
 
   // Auto Banner & Auto Notification Generation
-  if (isNew) {
+  if (isActuallyNew) {
     let settings = getLocal('pp_settings', DEFAULT_SETTINGS) as AppSettings;
     if (IS_FIREBASE_REAL && firebaseDb) {
       try {

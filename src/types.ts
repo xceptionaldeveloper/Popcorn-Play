@@ -16,7 +16,7 @@ export interface Episode {
   downloadLinks?: DownloadLink[];
 }
 
-export type ContentCategory = 'Movies' | 'Anime' | 'Drama' | 'Cartoon' | 'Serial';
+export type ContentCategory = string;
 
 export interface ContentItem {
   id: string;
@@ -46,7 +46,7 @@ export interface BannerItem {
   title: string;
   description: string;
   coverUrl: string;
-  category?: 'Movies' | 'Anime' | 'Drama' | 'Cartoon' | 'Serial';
+  category?: string;
   contentId?: string;
   isActive: boolean;
   type: 'custom' | 'auto';
@@ -129,12 +129,9 @@ export interface AppSettings {
   recDob?: string;
   recNid?: string;
   customCategories?: {
-    Movies?: string[];
-    Anime?: string[];
-    Drama?: string[];
-    Cartoon?: string[];
-    Serial?: string[];
+    [key: string]: string[] | undefined;
   };
+  mainCategories?: string[];
   premiumPlans?: PremiumPlan[];
   // Popup configs
   popupEnabled?: boolean;
@@ -183,6 +180,15 @@ export interface VisitorStat {
   revenue: number;
 }
 
+export interface WatchHistoryEntry {
+  id: string; // unique timestamp key
+  contentId: string;
+  title: string;
+  coverUrl: string;
+  category: string;
+  watchedAt: number; // timestamp
+}
+
 export interface UserProfile {
   uid: string;
   name: string;
@@ -193,6 +199,8 @@ export interface UserProfile {
   isAdmin?: boolean;
   premiumUntil?: number | null;
   password?: string;
+  watchHistory?: WatchHistoryEntry[];
+  parentalEnabled?: boolean;
 }
 
 export const SLIDER_ANIMATIONS: Record<string, {

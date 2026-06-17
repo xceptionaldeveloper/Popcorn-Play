@@ -135,8 +135,8 @@ service cloud.firestore {
                      && (!incoming().keys().hasAny(['isAdmin']) || incoming().isAdmin == false || isAdmin());
       allow update: if isValidUserProfile(incoming()) && (
                       isAdmin() || 
-                      (isLocalUser(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password'])) ||
-                      (isSignedIn() && isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password']))
+                      (isLocalUser(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password', 'watchHistory', 'parentalEnabled'])) ||
+                      (isSignedIn() && isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password', 'watchHistory', 'parentalEnabled']))
                     );
       allow delete: if isAdmin();
       allow list: if isAdmin();

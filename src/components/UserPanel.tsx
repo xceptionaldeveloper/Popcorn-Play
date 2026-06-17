@@ -9,8 +9,9 @@ import {
 import { 
   ContentItem, Episode, AppSettings, NotificationItem, 
   PaymentRequest, SupportSession, UserProfile, ContentCategory,
-  SLIDER_ANIMATIONS
+  SLIDER_ANIMATIONS, WatchHistoryEntry
 } from '../types';
+import { UserProfileComponent } from './UserProfileComponent';
 import { 
   subscribeContent, subscribeAppSettings, subscribeNotifications, subscribeContentFiltered,
   subscribeUserChat, sendMessage, submitPaymentRequest, clearChatSession, deleteChatSession, signInWithGoogle, customSignUp,
@@ -61,7 +62,15 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     // Read cached login
     try {
       const cached = localStorage.getItem('pp_current_user');
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        const cleanEmail = parsed?.email?.trim().toLowerCase();
+        const isAdmin = cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === 'admin@popcornplay.com';
+        if (isAdmin && localStorage.getItem('pp_user_logged_in') !== 'true') {
+          return null;
+        }
+        return parsed;
+      }
     } catch(e){}
     return null; // Empty profile means Auth required
   });
@@ -175,7 +184,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   // Automatically take other uploaded items from content list that are NOT currently in rawBanners
   // to ensure they show up in the slider too under their respective categories and "All"!
   const activeContentItems = content.filter(item => {
-    if (item.isAdult && !adultEnabled) return false;
+    if (item.isAdult && (!adultEnabled || userProfile?.parentalEnabled)) return false;
     if (coveredContentIds.has(item.id)) return false;
     return true;
   });
@@ -247,7 +256,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   const carouselItems = bannerCarouselItems.length > 0
     ? bannerCarouselItems
     : content
-        .filter(item => !item.isAdult || adultEnabled)
+        .filter(item => !item.isAdult || (adultEnabled && !userProfile?.parentalEnabled))
         .filter(item => {
           if (selectedCategory !== 'All') {
             return item.category.toLowerCase() === selectedCategory.toLowerCase();
@@ -337,18 +346,13 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     };
   }, []);
 
-  // Real-time Firestore search/query subscription
+  // Real-time Firestore content subscription
   useEffect(() => {
-    const unsubContent = subscribeContentFiltered(
-      selectedCategory,
-      selectedSubCategory,
-      searchQuery,
-      (items) => setContent(items)
-    );
+    const unsubContent = subscribeContent((items) => setContent(items));
     return () => {
       unsubContent();
     };
-  }, [selectedCategory, selectedSubCategory, searchQuery]);
+  }, []);
 
   // Keep viewingContent up to date with fresh live content catalog updates
   useEffect(() => {
@@ -356,9 +360,59 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
       const fresh = content.find(c => c.id === viewingContent.id);
       if (fresh) {
         setViewingContent(fresh);
+      } else {
+        // Handle content deletion from administrative registry
+        setViewingContent(null);
+        triggerAlert("অ্যাডমিন এই কনটেন্টটি মুছে ফেলেছেন বা এডিট করেছেন।");
       }
     }
   }, [content, viewingContent?.id]);
+
+  // Real-time validation for active premium content playback & subscription auto-expiration checker
+  useEffect(() => {
+    const checkPremiumStatus = () => {
+      if (userProfile && userProfile.isPremium) {
+        // Exclude admins from expiration checks
+        const adminEmail = settings?.adminEmail?.trim().toLowerCase() || 'admin@popcornplay.com';
+        const cleanEmail = userProfile.email?.trim().toLowerCase();
+        if (cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === adminEmail) {
+          return;
+        }
+
+        if (userProfile.premiumUntil && Date.now() > userProfile.premiumUntil) {
+          // Subscription has expired
+          const expiredProfile = { ...userProfile, isPremium: false, premiumUntil: null };
+          setUserProfile(expiredProfile);
+          updateUserProfile(expiredProfile);
+          triggerAlert("আপনার প্রিমিয়াম সাবস্ক্রিপশন শেষ হয়ে গেছে! আবার কিনতে VIP Upgrade বাটনে ক্লিক করুন।");
+
+          // Kick out of active premium play if currently viewing
+          if (viewingContent && viewingContent.isPremium) {
+            setViewingContent(null);
+            setPlayingVideoUrl(null);
+            setSelectedEpisodeId(null);
+            setPaymentContent(viewingContent);
+          }
+        }
+      }
+    };
+
+    // Run initial check
+    checkPremiumStatus();
+
+    // Check active premium playback restrictions
+    if (viewingContent && viewingContent.isPremium && !isUserPremium()) {
+      setViewingContent(null);
+      setPlayingVideoUrl(null);
+      setSelectedEpisodeId(null);
+      setPaymentContent(viewingContent);
+      triggerAlert("এই কনটেন্টটি উপভোগ করতে প্রিমিয়াম সাবস্ক্রিপশন প্রয়োজন!");
+    }
+
+    // Dynamic timer to automatically handle passive expirations in active tabs
+    const interval = setInterval(checkPremiumStatus, 5000);
+    return () => clearInterval(interval);
+  }, [userProfile, viewingContent, settings]);
 
   // Synchronize React userProfile with Firebase Auth & Firestore, and handle auto-expiry
   useEffect(() => {
@@ -372,9 +426,26 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
       }
 
       if (fbUser) {
+        // Intercept any administrative/development accounts to prevent automated login if they didn't log in explicitly as standard viewer/user
+        const adminEmail = settings?.adminEmail?.trim().toLowerCase() || 'admin@popcornplay.com';
+        const cleanEmail = fbUser.email?.trim().toLowerCase();
+        const isAdminUser = cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === adminEmail;
+        if (isAdminUser && localStorage.getItem('pp_user_logged_in') !== 'true') {
+          setUserProfile(null);
+          localStorage.removeItem('pp_current_user');
+          localStorage.setItem('pp_premium_user_status', 'false');
+          localStorage.removeItem('pp_premium_until');
+          return;
+        }
+
         // User is authenticated via Firebase Auth
         unsubProfile = subscribeUserProfile(fbUser.uid, (freshProfile) => {
           if (freshProfile) {
+            // Synchronize the local favorites state with Firestore
+            if (freshProfile.favorites) {
+              setFavorites(freshProfile.favorites);
+              localStorage.setItem('pp_favorites', JSON.stringify(freshProfile.favorites));
+            }
             // Verify if active subscription has elapsed (expired)
             if (freshProfile.isPremium && freshProfile.premiumUntil && Date.now() > freshProfile.premiumUntil) {
               const expiredProfile = { ...freshProfile, isPremium: false, premiumUntil: null };
@@ -404,29 +475,16 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
               favorites: []
             };
             setUserProfile(newProfile);
+            setFavorites([]);
+            localStorage.setItem('pp_favorites', JSON.stringify([]));
             localStorage.setItem('pp_current_user', JSON.stringify(newProfile));
             updateUserProfile(newProfile); // This creates/merges it in doc('users', uid)
           }
         });
       } else {
         // No authenticated Firebase user.
-        // Check if the current user profile is an online Firebase user and reset it
-        const currentLocal = localStorage.getItem('pp_current_user');
-        let isLocalGuest = true;
-        if (currentLocal) {
-          try {
-            const parsed = JSON.parse(currentLocal);
-            if (parsed && parsed.uid && !parsed.uid.startsWith('local-usr-guest-') && !parsed.uid.startsWith('local-usr-')) {
-              isLocalGuest = false;
-            }
-          } catch (e) {}
-        }
-        if (!isLocalGuest) {
-          setUserProfile(null);
-          localStorage.removeItem('pp_current_user');
-          localStorage.setItem('pp_premium_user_status', 'false');
-          localStorage.removeItem('pp_premium_until');
-        }
+        // We prevent automatic logging out inside iframe preview or after page refresh,
+        // so we DO NOT wipe the session here. We only log out when the user explicitly clicks the Sign Out/Logout button!
       }
     });
 
@@ -496,6 +554,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     try {
       const profile = await signInWithGoogle();
       setUserProfile(profile);
+      localStorage.setItem('pp_user_logged_in', 'true');
       localStorage.setItem('pp_current_user', JSON.stringify(profile));
       triggerAlert(`Welcome, ${profile.name}! Logged in via Google.`);
     } catch (err: any) {
@@ -519,6 +578,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
       try {
         const profile = await customSignUp({ name: authName, email: authEmail, password: authPassword });
         setUserProfile(profile);
+        localStorage.setItem('pp_user_logged_in', 'true');
         localStorage.setItem('pp_current_user', JSON.stringify(profile));
         triggerAlert(`Welcome! Registered account for ${profile.name}`);
       } catch (err: any) {
@@ -533,6 +593,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
       try {
         const profile = await customSignIn(authEmail, authPassword);
         setUserProfile(profile);
+        localStorage.setItem('pp_user_logged_in', 'true');
         localStorage.setItem('pp_current_user', JSON.stringify(profile));
         triggerAlert(`Welcome back, ${profile.name}!`);
       } catch (err: any) {
@@ -552,6 +613,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     try {
       await logOut();
       setUserProfile(null);
+      localStorage.removeItem('pp_user_logged_in');
       localStorage.removeItem('pp_current_user');
       triggerAlert("Logged out of POPCORN PLAY.");
     } catch (err: any) {
@@ -571,6 +633,15 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     }
     setFavorites(updated);
     localStorage.setItem('pp_favorites', JSON.stringify(updated));
+
+    if (userProfile) {
+      const updatedProfile = {
+        ...userProfile,
+        favorites: updated
+      };
+      setUserProfile(updatedProfile);
+      updateUserProfile(updatedProfile);
+    }
   };
 
   // Check locks
@@ -626,6 +697,28 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     setTimeout(() => {
       watchSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 100);
+
+    // Record Watch History in Firestore User Profile
+    if (userProfile) {
+      const entryId = 'wh-' + Date.now();
+      const newEntry: WatchHistoryEntry = {
+        id: entryId,
+        contentId: item.id,
+        title: item.title,
+        coverUrl: item.coverUrl,
+        category: item.category,
+        watchedAt: Date.now()
+      };
+      const currentHistory = userProfile.watchHistory || [];
+      const filteredHistory = currentHistory.filter(h => h.contentId !== item.id);
+      const updatedHistory = [newEntry, ...filteredHistory].slice(0, 50);
+      const updatedProfile: UserProfile = {
+        ...userProfile,
+        watchHistory: updatedHistory
+      };
+      setUserProfile(updatedProfile);
+      updateUserProfile(updatedProfile);
+    }
   };
 
   // Submit payment upgrade request
@@ -684,7 +777,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   // Filter content based on Category, Search bar text, and Parental toggles
   const unfilteredContent = content.filter((item) => {
     // 1. Parental Lock (Adult 18+)
-    if (item.isAdult && !adultEnabled) return false;
+    if (item.isAdult && (!adultEnabled || userProfile?.parentalEnabled)) return false;
 
     // 2. Category selection
     if (selectedCategory !== 'All' && item.category !== selectedCategory) return false;
@@ -725,14 +818,21 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
          selectedCategory === 'Cartoon' ? ['Action', 'Romance', '18+ content', 'Adventure', 'Comedy', 'Family', 'Kids', 'Fantasy'] :
          selectedCategory === 'Serial' ? ['Action', 'Romance', '18+ content', 'Drama', 'Comedy', 'Thriller', 'Sci-Fi', 'Mystery'] : []);
     } else {
+      // Check if there is a custom preset specified for 'All Themes' or 'All'
+      const savedAll = settings?.customCategories?.['All Themes'] || settings?.customCategories?.['All'];
+      if (savedAll && savedAll.length > 0) {
+        return savedAll;
+      }
       // If "All" is selected, merge all configured subcategories together
-      const moviesList = settings?.customCategories?.Movies || ['Action', 'Romance', '18+ content', 'Thriller', 'Comedy', 'Sci-Fi', 'Horror'];
-      const animeList = settings?.customCategories?.Anime || ['Action', 'Romance', '18+ content', 'Fantasy', 'Shounen'];
-      const dramaList = settings?.customCategories?.Drama || ['Action', 'Romance', '18+ content', 'Comedy', 'Family'];
-      const cartoonList = settings?.customCategories?.Cartoon || ['Action', 'Romance', '18+ content', 'Adventure', 'Kids'];
-      const serialList = settings?.customCategories?.Serial || ['Action', 'Romance', '18+ content', 'Drama', 'Thriller'];
-      
-      const combined = Array.from(new Set([...moviesList, ...animeList, ...dramaList, ...cartoonList, ...serialList]));
+      const mainCategories = settings?.mainCategories || ['Movies', 'Anime', 'Drama', 'Cartoon', 'Serial'];
+      const combinedLists = mainCategories.flatMap(mcat => settings?.customCategories?.[mcat] || 
+        (mcat === 'Movies' ? ['Action', 'Romance', '18+ content', 'Thriller', 'Comedy', 'Sci-Fi', 'Horror', 'Bollywood', 'Dhallywood'] :
+         mcat === 'Anime' ? ['Action', 'Romance', '18+ content', 'Fantasy', 'Shounen', 'Slice of Life', 'Isekai', 'Adventure', 'Mystery'] :
+         mcat === 'Drama' ? ['Action', 'Romance', '18+ content', 'Comedy', 'Family', 'Thriller', 'Crime', 'Romantic Comedy'] :
+         mcat === 'Cartoon' ? ['Action', 'Romance', '18+ content', 'Adventure', 'Comedy', 'Family', 'Kids', 'Fantasy'] :
+         mcat === 'Serial' ? ['Action', 'Romance', '18+ content', 'Drama', 'Comedy', 'Thriller', 'Sci-Fi', 'Mystery'] : [])
+      );
+      const combined = Array.from(new Set(combinedLists));
       return combined;
     }
   };
@@ -902,26 +1002,29 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
 
               {/* Navigation lists */}
               <div className="space-y-1.5">
-                {(['All', 'Movies', 'Anime', 'Drama', 'Cartoon', 'Serial'] as const).map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => {
-                      setSelectedCategory(cat);
-                      setDrawerOpen(false);
-                      setActiveTab('home');
-                    }}
-                    className={`w-full flex items-center justify-between text-left px-4 py-2.5 rounded-xl transition-all ${
-                      (selectedCategory === cat && activeTab === 'home') 
-                        ? 'bg-red-650/10 text-red-500 border-l-2 border-red-500 font-bold' 
-                        : 'text-gray-300 hover:bg-white/5'
-                    }`}
-                  >
-                    <span className="text-sm font-sans">{cat}</span>
-                    <span className="text-[10px] text-gray-500 font-mono">
-                      {cat === 'All' ? content.length : content.filter(c => c.category === cat).length} Titles
-                    </span>
-                  </button>
-                ))}
+                {(() => {
+                  const mainCats = settings?.mainCategories || ['Movies', 'Anime', 'Drama', 'Cartoon', 'Serial'];
+                  return ['All', ...mainCats].map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => {
+                        setSelectedCategory(cat);
+                        setDrawerOpen(false);
+                        setActiveTab('home');
+                      }}
+                      className={`w-full flex items-center justify-between text-left px-4 py-2.5 rounded-xl transition-all ${
+                        (selectedCategory === cat && activeTab === 'home') 
+                          ? 'bg-red-650/10 text-red-500 border-l-2 border-red-500 font-bold' 
+                          : 'text-gray-300 hover:bg-white/5'
+                      }`}
+                    >
+                      <span className="text-sm font-sans">{cat}</span>
+                      <span className="text-[10px] text-gray-500 font-mono font-bold">
+                        {cat === 'All' ? content.length : content.filter(c => c.category === cat).length} Titles
+                      </span>
+                    </button>
+                  ));
+                })()}
               </div>
 
               {/* Toggle Adult Content */}
@@ -1861,60 +1964,39 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
 
       {/* 3. PROFILE / LOGIN PAGE */}
       {activeTab === 'profile' && (
-        <section className="px-4 py-12 max-w-lg mx-auto">
+        <section className="px-4 py-12 max-w-4xl mx-auto space-y-6">
           {userProfile ? (
-            /* Logged in state dashboard */
-            <div className="glass p-8 rounded-3xl space-y-6 text-center border-red-600/10 animate-float">
+            <div className="space-y-6">
+              <UserProfileComponent
+                userProfile={userProfile}
+                contentList={content}
+                favorites={favorites}
+                onPlay={(item) => {
+                  handleMediaPlay(item);
+                  setActiveTab('home');
+                }}
+                onToggleFavorite={toggleFavorite}
+                onUpdateProfile={updateUserProfile}
+                isUserPremium={isUserPremium}
+                triggerPaymentUpgrade={() => {
+                  const mockFilm: ContentItem = {
+                    id: 'unlock', title: 'Unlock VIP Popcorn Access', category: 'Movies',
+                    videoUrl: '', coverUrl: '', tags: [], isPremium: true, isAdult: false,
+                    schedule: '', description: '', rating: 9
+                  };
+                  setPaymentContent(mockFilm);
+                }}
+                triggerAlert={triggerAlert}
+              />
               
-              <div className="w-20 h-20 bg-gradient-to-tr from-red-600 to-amber-500 rounded-2xl mx-auto flex items-center justify-center text-white font-extrabold text-3xl shadow-xl border border-white/10">
-                {userProfile.name.charAt(0).toUpperCase()}
-              </div>
-
-              <div>
-                <h3 className="font-display font-black text-2xl text-white">{userProfile.name}</h3>
-                <span className="text-xs font-mono text-gray-500">{userProfile.email}</span>
-              </div>
-
-              <div className="bg-black/30 border border-white/5 p-4 rounded-2xl flex justify-between items-center text-xs text-left">
-                <div className="flex-1 min-w-0 pr-2">
-                  <span className="text-gray-400 block font-mono text-[9px] uppercase tracking-wider">TICKET CLEARANCE:</span>
-                  <span className="text-white font-bold block mt-0.5 text-xs uppercase flex items-center space-x-1 truncate">
-                    <Sparkles className="w-4 h-4 text-yellow-500 animate-spin flex-shrink-0" />
-                    <span className={isUserPremium() ? 'text-yellow-400 font-sans font-bold' : 'text-gray-300'}>
-                      {isUserPremium() ? '🍿 VIP PREMIUM UNLOCKED' : 'FREE USER'}
-                    </span>
-                  </span>
-                  {userProfile.premiumUntil && isUserPremium() && (
-                    <span className="text-[10px] text-gray-500 block mt-1 font-mono leading-none">
-                      Expires: {new Date(userProfile.premiumUntil).toLocaleDateString()}
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={() => {
-                    // Trigger payment invoice popup manually
-                    const mockFilm: ContentItem = {
-                      id: 'unlock', title: 'Unlock VIP Popcorn Access', category: 'Movies',
-                      videoUrl: '', coverUrl: '', tags: [], isPremium: true, isAdult: false,
-                      schedule: '', description: '', rating: 9
-                    };
-                    setPaymentContent(mockFilm);
-                  }}
-                  className="bg-yellow-500 hover:bg-yellow-400 text-black px-4 py-2.5 rounded-xl font-mono text-[10px] font-black uppercase transition-all whitespace-nowrap animate-float"
-                >
-                  {isUserPremium() ? 'EXTEND VIP' : 'UPGRADE NOW'}
-                </button>
-              </div>
-
-              <div className="border-t border-white/5 pt-6 space-y-3.5">
+              <div className="max-w-md mx-auto pt-4">
                 <button
                   onClick={handleSignOut}
-                  className="w-full bg-[#1c1c1f] hover:bg-red-650/10 hover:text-red-400 border border-white/5 px-4 py-3.5 rounded-xl text-xs font-mono font-bold transition-all"
+                  className="w-full bg-[#141416]/80 hover:bg-red-955/20 hover:text-red-400 border border-white/5 active:scale-[0.98] py-3.5 rounded-2xl text-[10px] font-mono font-extrabold uppercase tracking-widest transition-all shadow-md"
                 >
-                  LOG OUT ACCOUNT
+                  🚪 LOG OUT FROM THIS DEVICE
                 </button>
               </div>
-
             </div>
           ) : (
             /* Login forms */
