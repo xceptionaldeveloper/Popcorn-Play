@@ -490,9 +490,11 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
         const cleanEmail = fbUser.email?.trim().toLowerCase();
         const isAdminUser = cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === adminEmail;
         
+        const isGoogleLoggingIn = localStorage.getItem('pp_google_logging_in') === 'true';
+
         if (isAdminUser) {
           const manualEmail = localStorage.getItem('pp_user_manually_logged_in_email')?.trim().toLowerCase();
-          if (manualEmail !== cleanEmail) {
+          if (manualEmail !== cleanEmail && !isGoogleLoggingIn) {
             // Discard automatic sync of the admin account in the User Panel
             setUserProfile(null);
             localStorage.removeItem('pp_current_user');
@@ -500,7 +502,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
             localStorage.removeItem('pp_premium_until');
             return;
           }
-        } else if (localStorage.getItem('pp_user_logged_in') !== 'true') {
+        } else if (localStorage.getItem('pp_user_logged_in') !== 'true' && !isGoogleLoggingIn) {
           // If not admin, still verify if they are logged in.
           return;
         }
@@ -619,6 +621,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   // Auth Operations
   const handleGoogleLogin = async () => {
     try {
+      localStorage.setItem('pp_google_logging_in', 'true');
       const profile = await signInWithGoogle();
       setUserProfile(profile);
       localStorage.setItem('pp_user_logged_in', 'true');
@@ -629,6 +632,8 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
       triggerAlert(`Welcome, ${profile.name}! Logged in via Google.`);
     } catch (err: any) {
       setAuthError(err.message || 'Google Auth failed');
+    } finally {
+      localStorage.removeItem('pp_google_logging_in');
     }
   };
 
@@ -646,13 +651,15 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
         return;
       }
       try {
-        const profile = await customSignUp({ name: authName, email: authEmail, password: authPassword });
-        setUserProfile(profile);
         localStorage.setItem('pp_user_logged_in', 'true');
         localStorage.setItem('pp_user_manually_logged_in_email', authEmail.trim().toLowerCase());
+        const profile = await customSignUp({ name: authName, email: authEmail, password: authPassword });
+        setUserProfile(profile);
         localStorage.setItem('pp_current_user', JSON.stringify(profile));
         triggerAlert(`Welcome! Registered account for ${profile.name}`);
       } catch (err: any) {
+        localStorage.removeItem('pp_user_logged_in');
+        localStorage.removeItem('pp_user_manually_logged_in_email');
         setAuthError(err.message || 'Registration failed');
         return; // Prevent resetting fields if registration fails
       }
@@ -662,13 +669,15 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
         return;
       }
       try {
-        const profile = await customSignIn(authEmail, authPassword);
-        setUserProfile(profile);
         localStorage.setItem('pp_user_logged_in', 'true');
         localStorage.setItem('pp_user_manually_logged_in_email', authEmail.trim().toLowerCase());
+        const profile = await customSignIn(authEmail, authPassword);
+        setUserProfile(profile);
         localStorage.setItem('pp_current_user', JSON.stringify(profile));
         triggerAlert(`Welcome back, ${profile.name}!`);
       } catch (err: any) {
+        localStorage.removeItem('pp_user_logged_in');
+        localStorage.removeItem('pp_user_manually_logged_in_email');
         setAuthError(err.message || 'Login failed');
         return; // Prevent resetting fields if login fails
       }
