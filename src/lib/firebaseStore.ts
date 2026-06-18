@@ -5,7 +5,7 @@
  */
 
 import { initializeApp, getApp, getApps } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, signOut as firebaseSignOut, onAuthStateChanged, User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateEmail, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
+import { getAuth, setPersistence, browserLocalPersistence, signInWithPopup, GoogleAuthProvider, signOut as firebaseSignOut, onAuthStateChanged, User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateEmail, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc, getDocs, query, orderBy, limit, getDocFromServer, where } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { ContentItem, NotificationItem, SupportSession, PaymentRequest, AppSettings, VisitorStat, UserProfile, ChatMessage, PremiumPlan, BannerItem } from '../types';
@@ -71,6 +71,9 @@ if (IS_FIREBASE_REAL) {
   try {
     const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     firebaseAuth = getAuth(app);
+    setPersistence(firebaseAuth, browserLocalPersistence).catch((err) => {
+      console.warn("⚠️ Firebase Auth persistence registration error:", err);
+    });
     firebaseDb = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(default)');
     console.log('🔥 Popcorn Play: Successfully connected to cloud Firebase!');
     

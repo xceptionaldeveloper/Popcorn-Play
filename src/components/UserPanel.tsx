@@ -696,6 +696,11 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
 
   // Favorites logic
   const toggleFavorite = (id: string, title: string) => {
+    if (!userProfile) {
+      triggerAlert("Please log in to your POPCORN PLAY account to add items to your favorites!");
+      setActiveTab('profile');
+      return;
+    }
     let updated = [...favorites];
     if (updated.includes(id)) {
       updated = updated.filter(fid => fid !== id);
@@ -744,6 +749,11 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
 
   // Click watch actions
   const handleMediaPlay = (item: ContentItem) => {
+    if (!userProfile) {
+      triggerAlert("Please log in to your account first to watch or play video content!");
+      setActiveTab('profile');
+      return;
+    }
     if (isPremiumLocked(item)) {
       setPaymentContent(item);
       return;

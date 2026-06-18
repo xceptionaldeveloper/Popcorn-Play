@@ -31,7 +31,7 @@ export default function AdminPanel() {
   
   // Admin Login and Custom settings states
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
-    return sessionStorage.getItem('pp_admin_logged') === 'true';
+    return localStorage.getItem('pp_admin_logged') === 'true';
   });
   const [currentAuthUser, setCurrentAuthUser] = useState<any>(null);
   const [adminEmailInput, setAdminEmailInput] = useState('');
@@ -259,7 +259,7 @@ export default function AdminPanel() {
       if (!isUserAdmin) {
         // If the logged-in user is not a real admin, turn off admin access in the client
         setIsAdminLoggedIn(false);
-        sessionStorage.setItem('pp_admin_logged', 'false');
+        localStorage.setItem('pp_admin_logged', 'false');
       }
     }
   }, [currentAuthUser, settings?.adminEmail]);
@@ -950,20 +950,20 @@ export default function AdminPanel() {
           }
           
           setIsAdminLoggedIn(true);
-          sessionStorage.setItem('pp_admin_logged', 'true');
+          localStorage.setItem('pp_admin_logged', 'true');
           setLoginError(null);
           triggerAlert("Welcome Admin! Securely Authenticated with Firebase!");
         } catch (err: any) {
           console.error(err);
           // If popup or other standard operations are blocked/fail, login locally
           setIsAdminLoggedIn(true);
-          sessionStorage.setItem('pp_admin_logged', 'true');
+          localStorage.setItem('pp_admin_logged', 'true');
           setLoginError(null);
           triggerAlert("Welcome Admin! Logged in successfully. (⚠️ Sync limits might apply if connection is unstable)");
         }
       } else {
         setIsAdminLoggedIn(true);
-        sessionStorage.setItem('pp_admin_logged', 'true');
+        localStorage.setItem('pp_admin_logged', 'true');
         setLoginError(null);
         triggerAlert("Welcome Admin! Logged in successfully.");
       }
@@ -978,7 +978,7 @@ export default function AdminPanel() {
       const correctEmail = settings?.adminEmail?.trim() || 'admin@popcornplay.com';
       if (profile.email === 'mdikhlas098@gmail.com' || profile.email === correctEmail || profile.isAdmin) {
         setIsAdminLoggedIn(true);
-        sessionStorage.setItem('pp_admin_logged', 'true');
+        localStorage.setItem('pp_admin_logged', 'true');
         setLoginError(null);
         triggerAlert("Welcome Admin! Logged in via Google Authentication.");
       } else {
@@ -1087,7 +1087,7 @@ export default function AdminPanel() {
 
   const handleAdminLogout = async () => {
     setIsAdminLoggedIn(false);
-    sessionStorage.removeItem('pp_admin_logged');
+    localStorage.removeItem('pp_admin_logged');
     setAdminEmailInput('');
     setAdminPasswordInput('');
     try {
