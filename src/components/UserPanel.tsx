@@ -4,7 +4,7 @@ import {
   Search, Bell, Menu, Home, MessageSquare, User, Bookmark, 
   PlayCircle, Tv, Film, Lock, Unlock, Settings, CreditCard, 
   X, ChevronRight, Info, Heart, Download, Globe, Sparkles, Check, AlertCircle, RefreshCw,
-  ArrowLeft, ExternalLink, Mail, Code, Laptop, Smartphone, Copy
+  ArrowLeft, ExternalLink, Mail, Code, Laptop, Smartphone, Copy, Play, Maximize2
 } from 'lucide-react';
 import { 
   ContentItem, Episode, AppSettings, NotificationItem, 
@@ -21,16 +21,73 @@ import {
 // Helper to parse YouTube URLs for embedding
 function getYouTubeEmbedUrl(url: string | null): string | null {
   if (!url) return null;
-  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-  const match = url.match(regExp);
-  if (match && match[2].length === 11) {
-    return `https://www.youtube.com/embed/${match[2]}?autoplay=1&rel=0`;
-  }
-  const shortsRegExp = /\/shorts\/([a-zA-Z0-9_-]{11})/;
-  const shortsMatch = url.match(shortsRegExp);
+  const cleanUrl = url.trim();
+  
+  // 1. Shorts
+  const shortsMatch = cleanUrl.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
   if (shortsMatch && shortsMatch[1]) {
     return `https://www.youtube.com/embed/${shortsMatch[1]}?autoplay=1&rel=0`;
   }
+  
+  // 2. Live
+  const liveMatch = cleanUrl.match(/\/live\/([a-zA-Z0-9_-]{11})/);
+  if (liveMatch && liveMatch[1]) {
+    return `https://www.youtube.com/embed/${liveMatch[1]}?autoplay=1&rel=0`;
+  }
+
+  // 3. General YouTube ID extractor (handling watch?v=, youtu.be/, embed/, v/, /v=)
+  const mainRegExp = /^.*(?:(?:youtu\.be\/|v\/|vi\/|u\/\w\/|embed\/|live\/|shorts\/)|(?:(?:watch)?\?v(?:i)?=|\&v(?:i)?=))([^#\&\?]*).*/;
+  const match = cleanUrl.match(mainRegExp);
+  if (match && match[1] && match[1].trim().length === 11) {
+    return `https://www.youtube.com/embed/${match[1].trim()}?autoplay=1&rel=0`;
+  }
+
+  // Check if the URL *is* just the 11 character ID itself
+  if (/^[a-zA-Z0-9_-]{11}$/.test(cleanUrl)) {
+    return `https://www.youtube.com/embed/${cleanUrl}?autoplay=1&rel=0`;
+  }
+
+  // Query parameter backup
+  if (cleanUrl.includes('youtube.com') || cleanUrl.includes('youtu.be')) {
+    try {
+      const urlObj = new URL(cleanUrl);
+      const vParam = urlObj.searchParams.get('v');
+      if (vParam && vParam.trim().length === 11) {
+        return `https://www.youtube.com/embed/${vParam.trim()}?autoplay=1&rel=0`;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return null;
+}
+
+// Helper to get YouTube Thumbnail image
+function getYouTubeThumbnail(url: string | null): string | null {
+  if (!url) return null;
+  const cleanUrl = url.trim();
+  
+  const shortsMatch = cleanUrl.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
+  if (shortsMatch && shortsMatch[1]) {
+    return `https://img.youtube.com/vi/${shortsMatch[1]}/mqdefault.jpg`;
+  }
+  
+  const liveMatch = cleanUrl.match(/\/live\/([a-zA-Z0-9_-]{11})/);
+  if (liveMatch && liveMatch[1]) {
+    return `https://img.youtube.com/vi/${liveMatch[1]}/mqdefault.jpg`;
+  }
+
+  const mainRegExp = /^.*(?:(?:youtu\.be\/|v\/|vi\/|u\/\w\/|embed\/|live\/|shorts\/)|(?:(?:watch)?\?v(?:i)?=|\&v(?:i)?=))([^#\&\?]*).*/;
+  const match = cleanUrl.match(mainRegExp);
+  if (match && match[1] && match[1].trim().length === 11) {
+    return `https://img.youtube.com/vi/${match[1].trim()}/mqdefault.jpg`;
+  }
+
+  if (/^[a-zA-Z0-9_-]{11}$/.test(cleanUrl)) {
+    return `https://img.youtube.com/vi/${cleanUrl}/mqdefault.jpg`;
+  }
+
   return null;
 }
 
@@ -87,6 +144,8 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   const [viewingContent, setViewingContent] = useState<ContentItem | null>(null);
   const [playingVideoUrl, setPlayingVideoUrl] = useState<string | null>(null);
   const [selectedEpisodeId, setSelectedEpisodeId] = useState<string | null>(null);
+  const [activeLightboxImage, setActiveLightboxImage] = useState<string | null>(null);
+  const [activeTrailerLightboxUrl, setActiveTrailerLightboxUrl] = useState<string | null>(null);
 
   // Notification UI Toggle
   const [showNotifications, setShowNotifications] = useState(false);
@@ -430,11 +489,19 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
         const adminEmail = settings?.adminEmail?.trim().toLowerCase() || 'admin@popcornplay.com';
         const cleanEmail = fbUser.email?.trim().toLowerCase();
         const isAdminUser = cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === adminEmail;
-        if (isAdminUser && localStorage.getItem('pp_user_logged_in') !== 'true') {
-          setUserProfile(null);
-          localStorage.removeItem('pp_current_user');
-          localStorage.setItem('pp_premium_user_status', 'false');
-          localStorage.removeItem('pp_premium_until');
+        
+        if (isAdminUser) {
+          const manualEmail = localStorage.getItem('pp_user_manually_logged_in_email')?.trim().toLowerCase();
+          if (manualEmail !== cleanEmail) {
+            // Discard automatic sync of the admin account in the User Panel
+            setUserProfile(null);
+            localStorage.removeItem('pp_current_user');
+            localStorage.setItem('pp_premium_user_status', 'false');
+            localStorage.removeItem('pp_premium_until');
+            return;
+          }
+        } else if (localStorage.getItem('pp_user_logged_in') !== 'true') {
+          // If not admin, still verify if they are logged in.
           return;
         }
 
@@ -555,6 +622,9 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
       const profile = await signInWithGoogle();
       setUserProfile(profile);
       localStorage.setItem('pp_user_logged_in', 'true');
+      if (profile?.email) {
+        localStorage.setItem('pp_user_manually_logged_in_email', profile.email.trim().toLowerCase());
+      }
       localStorage.setItem('pp_current_user', JSON.stringify(profile));
       triggerAlert(`Welcome, ${profile.name}! Logged in via Google.`);
     } catch (err: any) {
@@ -579,6 +649,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
         const profile = await customSignUp({ name: authName, email: authEmail, password: authPassword });
         setUserProfile(profile);
         localStorage.setItem('pp_user_logged_in', 'true');
+        localStorage.setItem('pp_user_manually_logged_in_email', authEmail.trim().toLowerCase());
         localStorage.setItem('pp_current_user', JSON.stringify(profile));
         triggerAlert(`Welcome! Registered account for ${profile.name}`);
       } catch (err: any) {
@@ -594,6 +665,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
         const profile = await customSignIn(authEmail, authPassword);
         setUserProfile(profile);
         localStorage.setItem('pp_user_logged_in', 'true');
+        localStorage.setItem('pp_user_manually_logged_in_email', authEmail.trim().toLowerCase());
         localStorage.setItem('pp_current_user', JSON.stringify(profile));
         triggerAlert(`Welcome back, ${profile.name}!`);
       } catch (err: any) {
@@ -615,6 +687,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
       setUserProfile(null);
       localStorage.removeItem('pp_user_logged_in');
       localStorage.removeItem('pp_current_user');
+      localStorage.removeItem('pp_user_manually_logged_in_email');
       triggerAlert("Logged out of POPCORN PLAY.");
     } catch (err: any) {
       console.error("Signout error:", err);
@@ -1562,6 +1635,92 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                 <p className="text-xs text-gray-400 font-light leading-relaxed font-sans pt-1 border-t border-white/5">
                   {viewingContent.description}
                 </p>
+
+                {/* Trailers & Screenshots Gallery Section (watchlist design right side scroll) */}
+                {((viewingContent.trailers && viewingContent.trailers.length > 0) || (viewingContent.screenshots && viewingContent.screenshots.length > 0)) && (
+                  <div className="pt-3 border-t border-white/5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-gray-400 font-mono uppercase tracking-widest font-extrabold flex items-center space-x-1">
+                        <span>🎬 Trailers & Screen Shots (ট্রেইলার ও স্ক্রিনশট)</span>
+                      </span>
+                      <span className="text-[9px] text-gray-500 font-mono animate-pulse">
+                        Swipe left/right →
+                      </span>
+                    </div>
+
+                    <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none no-scrollbar snap-x snap-mandatory">
+                      {/* Trailers first */}
+                      {viewingContent.trailers?.map((trUrl, idx) => {
+                        const ytThumbnail = getYouTubeThumbnail(trUrl);
+                        return (
+                          <div
+                            key={`tr-${idx}`}
+                            onClick={() => {
+                              setActiveTrailerLightboxUrl(trUrl);
+                              triggerAlert("Opening Trailer in Lightbox Player...");
+                            }}
+                            className="relative w-40 sm:w-48 aspect-video rounded-xl overflow-hidden border border-white/5 bg-black hover:border-red-500/50 transition-all duration-300 flex-shrink-0 snap-start group cursor-pointer"
+                          >
+                            {ytThumbnail ? (
+                              <img
+                                src={ytThumbnail}
+                                alt={`Trailer ${idx + 1}`}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-gradient-to-tr from-red-650/20 to-black flex items-center justify-center p-3 text-center">
+                                <span className="text-[10px] text-gray-400 font-mono truncate max-w-full">Trailer {idx + 1}</span>
+                              </div>
+                            )}
+                            
+                            {/* Overlay play button */}
+                            <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-all flex items-center justify-center">
+                              <span className="w-8 h-8 rounded-full bg-red-650/80 group-hover:bg-red-650 flex items-center justify-center text-white scale-90 group-hover:scale-100 transition-all duration-300 shadow-md">
+                                <Play className="w-4 h-4 fill-white ml-0.5" />
+                              </span>
+                            </div>
+
+                            {/* Label */}
+                            <div className="absolute bottom-1 right-1 bg-black/75 px-1.5 py-0.5 rounded text-[8px] font-mono text-gray-300 font-bold uppercase tracking-wider">
+                              Trailer {idx + 1}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {/* Screenshots next */}
+                      {viewingContent.screenshots?.map((scUrl, idx) => {
+                        return (
+                          <div
+                            key={`sc-${idx}`}
+                            onClick={() => setActiveLightboxImage(scUrl)}
+                            className="relative w-40 sm:w-48 aspect-video rounded-xl overflow-hidden border border-white/5 bg-[#0b0b0d] hover:border-red-500/50 transition-all duration-300 flex-shrink-0 snap-start group cursor-pointer"
+                          >
+                            <img
+                              src={scUrl}
+                              alt={`Screen ${idx + 1}`}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                              referrerPolicy="no-referrer"
+                            />
+                            
+                            {/* Overlay zoom/expand */}
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                              <span className="w-7 h-7 rounded-full bg-black/60 flex items-center justify-center text-white">
+                                <Maximize2 className="w-3.5 h-3.5" />
+                              </span>
+                            </div>
+
+                            {/* Label */}
+                            <div className="absolute bottom-1 right-1 bg-black/70 px-1.5 py-0.5 rounded text-[8px] font-mono text-gray-300">
+                              Screen {idx + 1}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Interactive Star Rating Selector */}
                 <div className="pt-3 border-t border-white/5 space-y-2">
@@ -2731,6 +2890,69 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                 Confirm
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* SCREENSHOT FULLSCREEN LIGHTBOX MODAL */}
+      {activeLightboxImage && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-4 backdrop-blur-md animate-fade-in"
+          onClick={() => setActiveLightboxImage(null)}
+        >
+          <button 
+            type="button"
+            onClick={() => setActiveLightboxImage(null)}
+            className="absolute top-6 right-6 bg-white/10 hover:bg-white/20 text-white rounded-full p-2.5 transition-all z-10 cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          
+          <img 
+            src={activeLightboxImage} 
+            alt="Screenshot Preview" 
+            className="max-w-full max-h-[85vh] object-contain rounded-2xl border border-white/10 shadow-2xl transition-all"
+            onClick={(e) => e.stopPropagation()}
+            referrerPolicy="no-referrer"
+          />
+        </div>
+      )}
+
+      {/* TRAILER EMBED LIGHTBOX MODAL */}
+      {activeTrailerLightboxUrl && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-4 backdrop-blur-md animate-fade-in"
+          onClick={() => setActiveTrailerLightboxUrl(null)}
+        >
+          <button 
+            type="button"
+            onClick={() => setActiveTrailerLightboxUrl(null)}
+            className="absolute top-6 right-6 bg-white/10 hover:bg-white/20 text-white rounded-full p-2.5 transition-all z-10 cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          
+          <div 
+            className="w-full max-w-4xl aspect-video rounded-2xl overflow-hidden border border-white/10 shadow-2xl relative bg-black transition-all"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {getYouTubeEmbedUrl(activeTrailerLightboxUrl) ? (
+              <iframe
+                src={getYouTubeEmbedUrl(activeTrailerLightboxUrl)!}
+                title="Trailer video player"
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+                className="w-full h-full"
+              />
+            ) : (
+              <video 
+                src={activeTrailerLightboxUrl} 
+                controls 
+                autoPlay
+                className="w-full h-full object-contain"
+              />
+            )}
           </div>
         </div>
       )}

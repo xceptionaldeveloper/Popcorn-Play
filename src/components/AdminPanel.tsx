@@ -58,16 +58,20 @@ export default function AdminPanel() {
   const [movieForm, setMovieForm] = useState<Partial<ContentItem>>({
     id: '', title: '', coverUrl: '', videoUrl: '', downloadUrl: '',
     tags: [], category: 'Movies', isPremium: false, isAdult: false,
-    schedule: 'Released', description: '', rating: 8.5
+    schedule: 'Released', description: '', rating: 8.5, trailers: [], screenshots: []
   });
   const [tagInput, setTagInput] = useState('');
+  const [movieTrailerInput, setMovieTrailerInput] = useState('');
+  const [movieScreenshotInput, setMovieScreenshotInput] = useState('');
   
   // Input States - Series (Anime, Cartoon, Drama, Serial)
   const [seriesForm, setSeriesForm] = useState<Partial<ContentItem>>({
     id: '', title: '', coverUrl: '', tags: [], category: 'Anime',
     isPremium: false, isAdult: false, schedule: 'Monday', description: '',
-    rating: 8.5, status: 'ongoing', episodes: [], zipUrl: ''
+    rating: 8.5, status: 'ongoing', episodes: [], zipUrl: '', trailers: [], screenshots: []
   });
+  const [seriesTrailerInput, setSeriesTrailerInput] = useState('');
+  const [seriesScreenshotInput, setSeriesScreenshotInput] = useState('');
   const [seriesCategory, setSeriesCategory] = useState<'Anime' | 'Cartoon' | 'Drama' | 'Serial'>('Anime');
   const [episodeForm, setEpisodeForm] = useState<Partial<Episode>>({
     number: 1, title: '', videoUrl: '', isFiller: false
@@ -337,7 +341,9 @@ export default function AdminPanel() {
       description: movieForm.description || 'No description provided.',
       rating: existing && existing.ratingCount !== undefined && existing.ratingCount > 0
         ? existing.rating
-        : (Number(movieForm.rating) || 8.0)
+        : (Number(movieForm.rating) || 8.0),
+      trailers: movieForm.trailers || [],
+      screenshots: movieForm.screenshots || []
     };
 
     await saveContentItem(item);
@@ -345,13 +351,19 @@ export default function AdminPanel() {
     setMovieForm({
       id: '', title: '', coverUrl: '', videoUrl: '', downloadUrl: '',
       tags: [], category: 'Movies', isPremium: false, isAdult: false,
-      schedule: 'Released', description: '', rating: 8.5
+      schedule: 'Released', description: '', rating: 8.5, trailers: [], screenshots: []
     });
     setMovieQualities([]);
+    setMovieTrailerInput('');
+    setMovieScreenshotInput('');
   };
 
   const handleEditMovie = (item: ContentItem) => {
-    setMovieForm(item);
+    setMovieForm({
+      ...item,
+      trailers: item.trailers || [],
+      screenshots: item.screenshots || []
+    });
     setMovieQualities(item.downloadLinks || []);
   };
 
@@ -406,7 +418,9 @@ export default function AdminPanel() {
         : (Number(seriesForm.rating) || 8.0),
       status: seriesForm.status || 'ongoing',
       zipUrl: seriesForm.zipUrl || '',
-      episodes: seriesForm.episodes || []
+      episodes: seriesForm.episodes || [],
+      trailers: seriesForm.trailers || [],
+      screenshots: seriesForm.screenshots || []
     };
 
     await saveContentItem(item);
@@ -414,8 +428,10 @@ export default function AdminPanel() {
     setSeriesForm({
       id: '', title: '', coverUrl: '', tags: [], category: seriesCategory,
       isPremium: false, isAdult: false, schedule: 'Monday', description: '',
-      rating: 8.5, status: 'ongoing', episodes: [], zipUrl: ''
+      rating: 8.5, status: 'ongoing', episodes: [], zipUrl: '', trailers: [], screenshots: []
     });
+    setSeriesTrailerInput('');
+    setSeriesScreenshotInput('');
   };
 
   const addEpisodeQualityLink = () => {
@@ -2002,6 +2018,98 @@ export default function AdminPanel() {
                   />
                 </div>
 
+                {/* Trailers List Manager */}
+                <div className="bg-[#0c0c0e] border border-white/5 p-4 rounded-2xl space-y-3">
+                  <span className="text-[10px] text-gray-500 font-mono tracking-widest font-extrabold uppercase block">
+                    🎬 Trailers (Added: {movieForm.trailers?.length || 0})
+                  </span>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      placeholder="Add YouTube or direct video trailer link..."
+                      value={movieTrailerInput}
+                      onChange={(e) => setMovieTrailerInput(e.target.value)}
+                      className="flex-1 bg-[#141417] border border-white/5 focus:border-red-500 focus:outline-none rounded-xl px-3 py-2.5 text-xs text-white font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!movieTrailerInput.trim()) return;
+                        const list = movieForm.trailers || [];
+                        setMovieForm({ ...movieForm, trailers: [...list, movieTrailerInput.trim()] });
+                        setMovieTrailerInput('');
+                      }}
+                      className="bg-red-650 hover:bg-red-600 px-4 rounded-xl text-white font-mono text-xs font-semibold cursor-pointer shrink-0 animate-scale"
+                    >
+                      ADD
+                    </button>
+                  </div>
+                  {movieForm.trailers && movieForm.trailers.length > 0 && (
+                    <div className="space-y-1 max-h-24 overflow-y-auto pt-1 no-scrollbar border-t border-white/5">
+                      {movieForm.trailers.map((tr, idx) => (
+                        <div key={idx} className="flex justify-between items-center bg-[#141417] p-2 rounded-xl text-xs border border-white/5">
+                          <span className="text-[10px] text-gray-400 truncate max-w-[240px] font-mono">{tr}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMovieForm({ ...movieForm, trailers: movieForm.trailers?.filter((_, i) => i !== idx) });
+                            }}
+                            className="text-red-400 hover:text-red-300 p-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Screenshots List Manager */}
+                <div className="bg-[#0c0c0e] border border-white/5 p-4 rounded-2xl space-y-3">
+                  <span className="text-[10px] text-gray-500 font-mono tracking-widest font-extrabold uppercase block">
+                    📸 Screenshots (Added: {movieForm.screenshots?.length || 0})
+                  </span>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      placeholder="Add image screenshot URL..."
+                      value={movieScreenshotInput}
+                      onChange={(e) => setMovieScreenshotInput(e.target.value)}
+                      className="flex-1 bg-[#141417] border border-white/5 focus:border-red-500 focus:outline-none rounded-xl px-3 py-2.5 text-xs text-white font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!movieScreenshotInput.trim()) return;
+                        const list = movieForm.screenshots || [];
+                        setMovieForm({ ...movieForm, screenshots: [...list, movieScreenshotInput.trim()] });
+                        setMovieScreenshotInput('');
+                      }}
+                      className="bg-red-650 hover:bg-red-600 px-4 rounded-xl text-white font-mono text-xs font-semibold cursor-pointer shrink-0 animate-scale"
+                    >
+                      ADD
+                    </button>
+                  </div>
+                  {movieForm.screenshots && movieForm.screenshots.length > 0 && (
+                    <div className="grid grid-cols-4 gap-2 pt-2 border-t border-white/5">
+                      {movieForm.screenshots.map((sc, idx) => (
+                        <div key={idx} className="relative group rounded-lg overflow-hidden border border-white/5 h-12 bg-black">
+                          <img src={sc} alt="" className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMovieForm({...movieForm, screenshots: movieForm.screenshots?.filter((_, i) => i !== idx)});
+                            }}
+                            className="absolute top-1 right-1 bg-red-650 hover:bg-red-600 text-white rounded p-1 shadow-md opacity-90 group-hover:opacity-100"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* Multi-Quality Movie Download Link Manager */}
                 <div className="bg-[#0c0c0e] border border-white/5 p-4 rounded-2xl space-y-3.5">
                   <span className="text-[10px] text-gray-500 font-mono tracking-widest font-extrabold uppercase block">
@@ -2390,6 +2498,98 @@ export default function AdminPanel() {
                   />
                 </div>
 
+                {/* Series Trailers List Manager */}
+                <div className="bg-[#0c0c0e] border border-white/5 p-4 rounded-2xl space-y-3">
+                  <span className="text-[10px] text-gray-500 font-mono tracking-widest font-extrabold uppercase block">
+                    🎬 Series Trailers (Added: {seriesForm.trailers?.length || 0})
+                  </span>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      placeholder="Add YouTube or direct video trailer link..."
+                      value={seriesTrailerInput}
+                      onChange={(e) => setSeriesTrailerInput(e.target.value)}
+                      className="flex-1 bg-[#141417] border border-white/5 focus:border-red-500 focus:outline-none rounded-xl px-3 py-2.5 text-xs text-white font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!seriesTrailerInput.trim()) return;
+                        const list = seriesForm.trailers || [];
+                        setSeriesForm({ ...seriesForm, trailers: [...list, seriesTrailerInput.trim()] });
+                        setSeriesTrailerInput('');
+                      }}
+                      className="bg-red-650 hover:bg-red-600 px-4 rounded-xl text-white font-mono text-xs font-semibold cursor-pointer shrink-0 animate-scale"
+                    >
+                      ADD
+                    </button>
+                  </div>
+                  {seriesForm.trailers && seriesForm.trailers.length > 0 && (
+                    <div className="space-y-1 max-h-24 overflow-y-auto pt-1 no-scrollbar border-t border-white/5">
+                      {seriesForm.trailers.map((tr, idx) => (
+                        <div key={idx} className="flex justify-between items-center bg-[#141417] p-2 rounded-xl text-xs border border-white/5">
+                          <span className="text-[10px] text-gray-400 truncate max-w-[240px] font-mono">{tr}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSeriesForm({ ...seriesForm, trailers: seriesForm.trailers?.filter((_, i) => i !== idx) });
+                            }}
+                            className="text-red-400 hover:text-red-300 p-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Series Screenshots List Manager */}
+                <div className="bg-[#0c0c0e] border border-white/5 p-4 rounded-2xl space-y-3">
+                  <span className="text-[10px] text-gray-500 font-mono tracking-widest font-extrabold uppercase block">
+                    📸 Series Screenshots (Added: {seriesForm.screenshots?.length || 0})
+                  </span>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      placeholder="Add image screenshot URL..."
+                      value={seriesScreenshotInput}
+                      onChange={(e) => setSeriesScreenshotInput(e.target.value)}
+                      className="flex-1 bg-[#141417] border border-white/5 focus:border-red-500 focus:outline-none rounded-xl px-3 py-2.5 text-xs text-white font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!seriesScreenshotInput.trim()) return;
+                        const list = seriesForm.screenshots || [];
+                        setSeriesForm({ ...seriesForm, screenshots: [...list, seriesScreenshotInput.trim()] });
+                        setSeriesScreenshotInput('');
+                      }}
+                      className="bg-red-650 hover:bg-red-600 px-4 rounded-xl text-white font-mono text-xs font-semibold cursor-pointer shrink-0 animate-scale"
+                    >
+                      ADD
+                    </button>
+                  </div>
+                  {seriesForm.screenshots && seriesForm.screenshots.length > 0 && (
+                    <div className="grid grid-cols-4 gap-2 pt-2 border-t border-white/5">
+                      {seriesForm.screenshots.map((sc, idx) => (
+                        <div key={idx} className="relative group rounded-lg overflow-hidden border border-white/5 h-12 bg-black">
+                          <img src={sc} alt="" className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSeriesForm({...seriesForm, screenshots: seriesForm.screenshots?.filter((_, i) => i !== idx)});
+                            }}
+                            className="absolute top-1 right-1 bg-red-650 hover:bg-red-600 text-white rounded p-1 shadow-md opacity-90 group-hover:opacity-100"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <div>
                   <label className="text-xs text-gray-400 font-mono block mb-1">Plot Summary</label>
                   <textarea
@@ -2691,7 +2891,11 @@ export default function AdminPanel() {
                           <button
                             onClick={() => {
                               setSeriesCategory(item.category as any);
-                              setSeriesForm(item);
+                              setSeriesForm({
+                                ...item,
+                                trailers: item.trailers || [],
+                                screenshots: item.screenshots || []
+                              });
                             }}
                             className="bg-white/5 hover:bg-white/10 text-gray-300 p-2 rounded-lg transition-all"
                           >

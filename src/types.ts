@@ -37,6 +37,8 @@ export interface ContentItem {
   status?: 'ongoing' | 'completed'; // Used for Series
   episodes?: Episode[];              // Episodic content (Anime, Drama, etc.)
   zipUrl?: string;                   // Link for download complete pack
+  trailers?: string[];               // Multiple trailers (YouTube or video URLs)
+  screenshots?: string[];            // Multiple screenshots (image URLs)
   createdAt?: number;
   updatedAt?: number;
 }
