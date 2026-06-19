@@ -272,7 +272,7 @@ export const UserProfileComponent: React.FC<UserProfileComponentProps> = ({
                     className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-mono font-black text-[10px] py-3 rounded-xl uppercase tracking-wider shadow-lg shadow-yellow-500/5 transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
                   >
                     <Sparkles className="w-3.5 h-3.5 text-black" />
-                    <span>{isUserPremium() ? 'RENEW VIP EXPIRED' : 'UPGRADE TO VIP PASS'}</span>
+                    <span>{isUserPremium() ? 'RENEW / EXTEND VIP' : 'UPGRADE TO VIP PASS'}</span>
                   </button>
                 </div>
               </div>

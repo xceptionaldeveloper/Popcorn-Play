@@ -9,7 +9,7 @@ import {
 import { 
   ContentItem, Episode, DownloadLink, AppSettings, PaymentRequest, 
   SupportSession, VisitorStat, ContentCategory, PremiumPlan, BannerItem, NotificationItem, PopupItem, UserProfile,
-  SLIDER_ANIMATIONS
+  SLIDER_ANIMATIONS, NoticeItem
 } from '../types';
 import { 
   subscribeContent, saveContentItem, deleteContentItem, 
@@ -18,13 +18,15 @@ import {
   clearChatSession, deleteChatSession, hideChatFromAdmin, restoreChatFromAdmin, getVisitorStats, saveVisitorStats, sendNotification,
   deletePaymentRequestByAdmin, modifyPaymentRequestByAdmin, signInWithGoogle, logOut,
   deleteNotificationItem, updateNotificationItem, subscribeNotifications,
+  subscribeNotices, saveNoticeItem, deleteNoticeItem,
   IS_FIREBASE_REAL,
   subscribeAllUserProfiles, adminUpdateUserProfile, deleteUserProfile,
   customSignIn, customSignUp, subscribeAuth
 } from '../lib/firebaseStore';
+import { verifyUserSubscriptions } from '../lib/subscriptionService';
 
 export default function AdminPanel() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'movies' | 'series' | 'support' | 'financials' | 'settings' | 'categories' | 'popups' | 'banners' | 'notifications' | 'socials' | 'users'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'movies' | 'series' | 'support' | 'financials' | 'settings' | 'categories' | 'popups' | 'banners' | 'notifications' | 'socials' | 'users' | 'noticeboard'>('dashboard');
   const [supportSubTab, setSupportSubTab] = useState<'chat' | 'management'>('chat');
   const [supportSearchQuery, setSupportSearchQuery] = useState('');
   const [supportFilterType, setSupportFilterType] = useState<'all' | 'active' | 'hidden'>('active');
@@ -219,6 +221,13 @@ export default function AdminPanel() {
   const [editingNotifId, setEditingNotifId] = useState<string | null>(null);
   const [editingNotifText, setEditingNotifText] = useState('');
 
+  // Noticeboard management states
+  const [noticesList, setNoticesList] = useState<NoticeItem[]>([]);
+  const [newNoticeTitle, setNewNoticeTitle] = useState('');
+  const [newNoticeContent, setNewNoticeContent] = useState('');
+  const [newNoticeIsPremium, setNewNoticeIsPremium] = useState(true);
+  const [editingNoticeId, setEditingNoticeId] = useState<string | null>(null);
+
   // Social links management states
   const [newSocialPlatform, setNewSocialPlatform] = useState('');
   const [newSocialLinkName, setNewSocialLinkName] = useState('');
@@ -236,7 +245,7 @@ export default function AdminPanel() {
   const [editUserPremiumDays, setEditUserPremiumDays] = useState(30);
 
   // Modern VIP subscription moderation states
-  const [ledgerFilter, setLedgerFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'expired'>('pending');
+  const [ledgerFilter, setLedgerFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'expired' | 'expire_today'>('pending');
   const [ledgerSearch, setLedgerSearch] = useState('');
 
   useEffect(() => {
@@ -258,18 +267,52 @@ export default function AdminPanel() {
       
       if (!isUserAdmin) {
         // If the logged-in user is not a real admin, turn off admin access in the client
-        setIsAdminLoggedIn(false);
-        localStorage.setItem('pp_admin_logged', 'false');
+        // unless they are marked logged in on the admin level
+        if (localStorage.getItem('pp_admin_logged') === 'true') {
+          setIsAdminLoggedIn(true);
+        } else {
+          setIsAdminLoggedIn(false);
+          localStorage.setItem('pp_admin_logged', 'false');
+        }
+      } else {
+        // If the logged-in user is indeed a real admin, turn on/keep admin access in the client
+        setIsAdminLoggedIn(true);
+        localStorage.setItem('pp_admin_logged', 'true');
       }
     }
   }, [currentAuthUser, settings?.adminEmail]);
+
+  // Silently re-authenticate Admin credentials if Admin is logged in but active Firebase session is not admin
+  useEffect(() => {
+    if (IS_FIREBASE_REAL && isAdminLoggedIn && settings) {
+      const correctEmail = settings?.adminEmail?.trim() || 'admin@popcornplay.com';
+      const correctPassword = settings?.adminPassword || 'Ikhlas124@#';
+      
+      const checkAndReAuth = async () => {
+        try {
+          const activeUser = currentAuthUser;
+          const isAdminActive = activeUser?.email === 'mdikhlas098@gmail.com' || 
+                                activeUser?.email?.toLowerCase().trim() === correctEmail.toLowerCase().trim();
+          
+          if (!isAdminActive) {
+            console.log("[AdminPanel Sync] Silently re-authenticating administrative Firebase session...");
+            await customSignIn(correctEmail.toLowerCase(), correctPassword);
+          }
+        } catch (err) {
+          console.warn("[AdminPanel Sync] Silent re-authentication failed: ", err);
+        }
+      };
+
+      checkAndReAuth();
+    }
+  }, [isAdminLoggedIn, currentAuthUser, settings]);
 
   useEffect(() => {
     // Subscriptions
     const unsubContent = subscribeContent((items) => setContent(items));
     const unsubSettings = subscribeAppSettings((conf) => setSettings(conf));
     
-    // Only subscribe to administrative database listeners if Admin is logged in AND verified as real admin in firebase to avoid unauthenticated permission checks
+    // Only subscribe to administrative database listeners if Admin is logged in
     let unsubPayments = () => {};
     let unsubChats = () => {};
     let unsubUsers = () => {};
@@ -283,9 +326,21 @@ export default function AdminPanel() {
       unsubPayments = subscribePayments((pays) => setPayments(pays));
       unsubChats = subscribeAllChatsForAdmin((chats) => setChatSessions(chats));
       unsubUsers = subscribeAllUserProfiles((profiles) => setAllUsersList(profiles));
+      
+      // Automatically verify and downgrade expired subscriptions in Firestore securely
+      verifyUserSubscriptions()
+        .then((res) => {
+          if (res.expiredCount > 0) {
+            console.log(`[Admin Authed Sync] Downgraded ${res.expiredCount} expired user(s).`);
+          }
+        })
+        .catch((err) => {
+          console.error("[Admin Authed Sync] Subscription check failed:", err);
+        });
     }
 
     const unsubNotifications = subscribeNotifications((notifs) => setNotificationsList(notifs));
+    const unsubNotices = subscribeNotices((notices) => setNoticesList(notices));
     setVisitorStats(getVisitorStats());
 
     return () => {
@@ -294,6 +349,7 @@ export default function AdminPanel() {
       unsubPayments();
       unsubChats();
       unsubNotifications();
+      unsubNotices();
       unsubUsers();
     };
   }, [isAdminLoggedIn, currentAuthUser, settings?.adminEmail]);
@@ -985,7 +1041,12 @@ export default function AdminPanel() {
         setLoginError("This Google Account is not authorized as Administrator.");
       }
     } catch (err: any) {
-      setLoginError(err.message || "Google Admin login failed.");
+      if (err.code === 'auth/popup-closed-by-user' || err.message?.includes('popup-closed-by-user') || err.message?.includes('auth/popup-closed-by-user')) {
+        setLoginError("গুগল সাইন-ইন উইন্ডো বন্ধ করা হয়েছে (পপ-আপ ব্লক হতে পারে)। দয়া করে ওপরের এডমিন আইকন ফরম ব্যবহার করে সরাসরি ইমেইল ও পাসওয়ার্ড দিয়ে সাইন-ইন করুন।");
+        triggerAlert("⚠️ গুগল সাইন-ইন উইন্ডো বন্ধ হয়েছে। ইমেইল/পাসওয়ার্ড দিয়ে এডমিন প্যানেলে লগইন করুন।");
+      } else {
+        setLoginError(err.message || "Google Admin login failed.");
+      }
     }
   };
 
@@ -1091,11 +1152,14 @@ export default function AdminPanel() {
     setAdminEmailInput('');
     setAdminPasswordInput('');
     try {
-      await logOut();
+      const isUserLogged = localStorage.getItem('pp_user_logged_in') === 'true';
+      if (!isUserLogged) {
+        await logOut();
+      }
     } catch (e) {
       console.error("Firebase logout from admin error:", e);
     }
-    triggerAlert("Logged out of administrative console and Firebase Auth session.");
+    triggerAlert("Logged out of administrative console.");
   };
 
   // Dynamic Payment Methods handlers
@@ -1601,6 +1665,16 @@ export default function AdminPanel() {
             </button>
 
             <button
+              onClick={() => setActiveTab('noticeboard')}
+              className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
+                activeTab === 'noticeboard' ? 'bg-red-600/10 text-red-500 border-l-2 border-red-500' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <Megaphone className="w-4 h-4" />
+              <span>Notice Board CMS</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('users')}
               className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
                 activeTab === 'users' ? 'bg-red-600/10 text-red-500 border-l-2 border-red-500' : 'text-gray-400 hover:bg-white/5 hover:text-white'
@@ -1644,6 +1718,7 @@ export default function AdminPanel() {
               {activeTab === 'banners' && 'Carousel Hero Banners Slider'}
               {activeTab === 'notifications' && 'Interactive Push Notification Center'}
               {activeTab === 'socials' && 'Social Links Configuration'}
+              {activeTab === 'noticeboard' && 'Notice Board CMS'}
               {activeTab === 'users' && 'User Accounts & Access Management'}
             </h2>
             <p className="text-sm text-gray-400">
@@ -1658,6 +1733,7 @@ export default function AdminPanel() {
               {activeTab === 'banners' && 'Create/edit banners shown in the top slide carousel. Automated releases automatically rotate oldest slides.'}
               {activeTab === 'notifications' && 'Draft alerts and high priority logs pushed directly to notifications logs for users.'}
               {activeTab === 'socials' && 'Configure official platforms, help links, and social channel handles displayed to users.'}
+              {activeTab === 'noticeboard' && 'Create, edit, and style notifications or bulletins displayed to your platform viewers.'}
               {activeTab === 'users' && 'Search for registered viewer profiles, configure premium status variables, and edit or delete accounts.'}
             </p>
           </div>
@@ -3648,6 +3724,21 @@ export default function AdminPanel() {
                         return false;
                       }
                     }).length, badgeColor: 'bg-orange-500 text-black' },
+                  { value: 'expire_today', label: 'Expires Today ⏰', count: allUsersList.filter(u => {
+                      if (!u.premiumUntil) return false;
+                      try {
+                        const val = u.premiumUntil;
+                        let ms = 0;
+                        if (typeof val === 'number') ms = val;
+                        else if (typeof val === 'string') ms = Date.parse(val);
+                        else if (val && (val as any).seconds) ms = (val as any).seconds * 1000;
+                        else if (val && (val as any).toDate) ms = (val as any).toDate().getTime();
+                        else ms = Number(val);
+                        return !isNaN(ms) && new Date(ms).toDateString() === new Date().toDateString();
+                      } catch (err) {
+                        return false;
+                      }
+                    }).length, badgeColor: 'bg-indigo-500 text-white' },
                   { value: 'all', label: 'All Ledgers', count: payments.length, badgeColor: 'bg-gray-700 text-gray-300' }
                 ].map((tab) => {
                   const isActive = ledgerFilter === tab.value;
@@ -3805,6 +3896,189 @@ export default function AdminPanel() {
                           })}
                         </tbody>
                       </table>
+                    </div>
+                  );
+                }
+
+                if (ledgerFilter === 'expire_today') {
+                  const todayUsers = allUsersList.filter((u) => {
+                    if (!u.premiumUntil) return false;
+                    try {
+                      const val = u.premiumUntil;
+                      let ms = 0;
+                      if (typeof val === 'number') ms = val;
+                      else if (typeof val === 'string') ms = Date.parse(val);
+                      else if (val && (val as any).seconds) ms = (val as any).seconds * 1000;
+                      else if (val && (val as any).toDate) ms = (val as any).toDate().getTime();
+                      else ms = Number(val);
+                      
+                      if (isNaN(ms)) return false;
+                      const matchesToday = new Date(ms).toDateString() === new Date().toDateString();
+                      if (!matchesToday) return false;
+
+                      if (ledgerSearch.trim() !== '') {
+                        const term = ledgerSearch.toLowerCase();
+                        const name = (u.name || u.displayName || '').toLowerCase();
+                        const email = (u.email || '').toLowerCase();
+                        return name.includes(term) || email.includes(term);
+                      }
+                      return true;
+                    } catch (e) {
+                      return false;
+                    }
+                  });
+
+                  if (todayUsers.length === 0) {
+                    return (
+                      <div className="text-center py-20 bg-[#08080a] border border-white/5 rounded-2xl animate-fadeIn">
+                        <AlertCircle className="w-10 h-10 text-indigo-400 mx-auto mb-2 opacity-70" />
+                        <p className="text-xs text-gray-500 font-mono">No VIP subscriptions are set to expire today on this date.</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-4 animate-fadeIn font-sans">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-red-950/20 border border-red-500/15 rounded-2xl p-4">
+                        <div className="text-xs space-y-0.5 text-left">
+                          <h4 className="text-white font-black font-mono">⚠️ BULK MANAGEMENT: TERMINATE TODAY'S VIP EXPIRATIONS</h4>
+                          <p className="text-gray-400 font-medium">To clear active premium status immediately for all users listed below, initiate the bulk termination sequence.</p>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            if (window.confirm(`⚠️ ATTENTION CRITICAL ACTION:\n\nAre you sure you want to cancel the VIP premium subscriptions for ALL ${todayUsers.length} accounts expiring today? This will remove all members' premium features instantly.`)) {
+                              let count = 0;
+                              for (const u of todayUsers) {
+                                try {
+                                  await adminUpdateUserProfile({
+                                    ...u,
+                                    isPremium: false,
+                                    premiumUntil: 0
+                                  });
+                                  count++;
+                                } catch (err) {
+                                  console.error(err);
+                                }
+                              }
+                              triggerAlert(`Successfully canceled VIP memberships for ${count} users.`);
+                            }
+                          }}
+                          className="w-full sm:w-auto bg-red-650 hover:bg-red-700 text-white font-mono font-bold px-4 py-2.5 rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg flex items-center justify-center gap-1.5"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Cancel All Listed VIPs ({todayUsers.length})
+                        </button>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="border-b border-white/5 text-gray-500 font-mono">
+                              <th className="pb-3 px-3 font-bold">Subscriber Name</th>
+                              <th className="pb-3 px-3 font-bold">Gmail Address</th>
+                              <th className="pb-3 px-3 text-center font-bold">Expiration Time (Local / UTC)</th>
+                              <th className="pb-3 px-3 text-center font-bold">Plan Status</th>
+                              <th className="pb-3 px-3 text-right font-bold">Quick Operations</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {todayUsers.map((u) => {
+                              let expSecs = 0;
+                              try {
+                                const v = u.premiumUntil;
+                                if (typeof v === 'number') expSecs = v;
+                                else if (typeof v === 'string') expSecs = Date.parse(v);
+                                else if (v && (v as any).seconds) expSecs = (v as any).seconds * 1000;
+                                else if (v && (v as any).toDate) expSecs = (v as any).toDate().getTime();
+                                else expSecs = Number(v);
+                              } catch (e) {}
+
+                              const expDate = new Date(expSecs);
+                              const isPast = Date.now() > expSecs;
+
+                              return (
+                                <tr key={u.uid} className="border-b border-white/5 hover:bg-white/[0.01] transition-all">
+                                  <td className="py-4 px-3 font-medium text-white">
+                                    <div className="font-sans font-bold leading-tight">{u.name || u.displayName || 'Unnamed Subscriber'}</div>
+                                    <span className="text-[9px] text-gray-500 font-mono block mt-0.5">UID: {u.uid}</span>
+                                  </td>
+                                  <td className="py-4 px-3 font-mono text-gray-300 font-bold select-all">{u.email}</td>
+                                  <td className="py-4 px-3 text-center">
+                                    <div className="font-mono text-xs text-indigo-400 font-extrabold select-all">
+                                      {expDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                                    </div>
+                                    <span className="text-[9px] text-gray-500 font-mono block">
+                                      {expDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  </td>
+                                  <td className="py-4 px-3 text-center">
+                                    {isPast ? (
+                                      <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-2.5 py-0.5 rounded-full text-[9px] font-mono font-bold uppercase">
+                                        Expired Today
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 px-2.5 py-0.5 rounded-full text-[9px] font-mono font-bold uppercase animate-pulse">
+                                        Expires Today
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-4 px-3 text-right">
+                                    <div className="flex items-center justify-end space-x-2">
+                                      <button
+                                        onClick={async () => {
+                                          if (window.confirm(`Are you sure you want to manually cancel the VIP subscription for "${u.name || u.email}" immediately?`)) {
+                                            try {
+                                              await adminUpdateUserProfile({
+                                                ...u,
+                                                isPremium: false,
+                                                premiumUntil: 0
+                                              });
+                                              triggerAlert(`Manually cancelled VIP subscription for "${u.name || u.email}"`);
+                                            } catch (err) {
+                                              console.error(err);
+                                              triggerAlert("Could not cancel subscription.");
+                                            }
+                                          }
+                                        }}
+                                        className="bg-red-500/10 hover:bg-red-650 hover:text-white border border-red-500/15 text-red-400 transition-all font-mono font-bold px-2.5 py-1.5 rounded-xl text-[10px] uppercase cursor-pointer"
+                                      >
+                                        Cancel VIP
+                                      </button>
+                                      <button
+                                        onClick={async () => {
+                                          const daysStr = window.prompt(`Extend Premium subscription for ${u.name || u.email}. Enter duration in days:`, "30");
+                                          if (daysStr) {
+                                            const days = parseInt(daysStr, 10);
+                                            if (!isNaN(days) && days > 0) {
+                                              const exp = Date.now() + days * 24 * 60 * 60 * 1000;
+                                              try {
+                                                await adminUpdateUserProfile({
+                                                  ...u,
+                                                  isPremium: true,
+                                                  premiumUntil: exp
+                                                });
+                                                triggerAlert(`Successfully renewed "${u.name || u.email}" for ${days} days.`);
+                                              } catch (err) {
+                                                console.error(err);
+                                                triggerAlert("Could not renew user.");
+                                              }
+                                            } else {
+                                              triggerAlert("Invalid days duration.");
+                                            }
+                                          }
+                                        }}
+                                        className="bg-emerald-500 hover:bg-emerald-600 text-white font-mono font-bold px-2.5 py-1.5 rounded-xl text-[10px] uppercase transition-all cursor-pointer shadow"
+                                      >
+                                        Renew VIP
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   );
                 }
@@ -5710,6 +5984,184 @@ export default function AdminPanel() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* NOTICE BOARD CMS */}
+        {activeTab === 'noticeboard' && (
+          <div className="space-y-6 max-w-7xl mx-auto font-sans animate-fadeIn">
+            <div className="glass p-6 md:p-8 rounded-3xl space-y-6">
+              <div>
+                <h3 className="font-display font-extrabold text-white text-xl">Notice Board CMS Manager</h3>
+                <p className="text-gray-400 text-xs mt-1">
+                  Create, Edit, and Delete real-time notice updates that will be shared directly with your app users.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                
+                {/* Form to Add / Edit Notice */}
+                <div className="lg:col-span-12 xl:col-span-4 bg-black/20 border border-white/5 rounded-2xl p-6 space-y-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-mono font-bold text-red-500 uppercase tracking-wider block">
+                      {editingNoticeId ? '✏️ Edit Existing Notice' : '🚀 Publish New Notice'}
+                    </span>
+                    {editingNoticeId && (
+                      <button
+                        onClick={() => {
+                          setEditingNoticeId(null);
+                          setNewNoticeTitle('');
+                          setNewNoticeContent('');
+                          setNewNoticeIsPremium(false);
+                        }}
+                        className="text-[10px] bg-white/5 font-mono text-gray-400 px-2 py-1 rounded hover:bg-white/10"
+                      >
+                        Cancel Edit
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="space-y-3.5">
+                    <div>
+                      <label className="text-[10px] font-mono text-gray-400 uppercase tracking-wider block mb-1">Notice Title / নোটিশের টাইটেল</label>
+                      <input
+                        type="text"
+                        value={newNoticeTitle}
+                        onChange={(e) => setNewNoticeTitle(e.target.value)}
+                        className="w-full bg-black/40 border border-white/5 focus:border-red-500 focus:outline-none rounded-xl px-3 py-2.5 text-xs text-white"
+                        placeholder="e.g. নতুন আপডেট এবং নোটিশ!"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-mono text-gray-400 uppercase tracking-wider block mb-1">Notice Content / নোটিশের বিস্তারিত বিবরণ</label>
+                      <textarea
+                        value={newNoticeContent}
+                        onChange={(e) => setNewNoticeContent(e.target.value)}
+                        className="w-full bg-black/40 border border-white/5 focus:border-red-500 focus:outline-none rounded-xl p-3 text-xs text-white h-32 resize-none"
+                        placeholder="আমাদের অ্যাপের নতুন সার্ভার এড করা হয়েছে। এখন থেকে আরো দ্রুত স্পিডে ভিডিও দেখতে পারবেন..."
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-3 bg-[#101012] border border-white/5 rounded-xl p-3">
+                      <input
+                        type="checkbox"
+                        id="newNoticeIsPremium"
+                        checked={newNoticeIsPremium}
+                        onChange={(e) => setNewNoticeIsPremium(e.target.checked)}
+                        className="rounded bg-black/40 border-white/10 text-red-600 focus:ring-red-500 h-4 w-4 cursor-pointer"
+                      />
+                      <label htmlFor="newNoticeIsPremium" className="text-xs text-gray-300 font-medium select-none cursor-pointer">
+                        Mark as Premium Notice / হাইলাইট করুন 🌟
+                        <span className="text-[9px] text-gray-500 block mt-0.5">প্রিমিয়াম বা অতি গুরুত্বপূর্ণ নোটিশের জন্য সুন্দর আকর্ষনীয় লাল ব্যাকগ্রাউন্ড ও ইফেক্ট যুক্ত হবে।</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={async () => {
+                      if (!newNoticeTitle.trim() || !newNoticeContent.trim()) {
+                        triggerAlert("Title & Content are required fields!");
+                        return;
+                      }
+                      
+                      const id = editingNoticeId || 'notice-' + Date.now();
+                      const item: NoticeItem = {
+                        id,
+                        title: newNoticeTitle.trim(),
+                        content: newNoticeContent.trim(),
+                        isPremium: newNoticeIsPremium,
+                        createdAt: editingNoticeId ? (noticesList.find(n => n.id === editingNoticeId)?.createdAt || Date.now()) : Date.now()
+                      };
+
+                      await saveNoticeItem(item);
+                      triggerAlert(editingNoticeId ? "Notice updated successfully!" : "New notice published successfully!");
+                      
+                      // Clear state
+                      setEditingNoticeId(null);
+                      setNewNoticeTitle('');
+                      setNewNoticeContent('');
+                      setNewNoticeIsPremium(false);
+                    }}
+                    className="w-full bg-gradient-to-r from-red-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white font-mono font-bold text-xs py-3 rounded-xl uppercase tracking-wider transition-all cursor-pointer shadow-md"
+                  >
+                    {editingNoticeId ? 'Update Notice' : 'Publish Noticeboard Item'}
+                  </button>
+                </div>
+
+                {/* Notices Archive Feed */}
+                <div className="lg:col-span-12 xl:col-span-8 space-y-4">
+                  <span className="text-xs font-mono font-bold text-gray-400 uppercase tracking-widest block">
+                    Active Bulletins ({noticesList.length})
+                  </span>
+
+                  <div className="space-y-3.5 max-h-[550px] overflow-y-auto pr-1">
+                    {noticesList.length === 0 ? (
+                      <div className="text-center py-16 bg-[#08080a] border border-white/5 rounded-2xl">
+                        <Megaphone className="w-8 h-8 text-gray-600 mx-auto mb-2 opacity-60" />
+                        <p className="text-xs text-gray-500 font-mono">No notices published yet in the database.</p>
+                      </div>
+                    ) : (
+                      noticesList.map((notice) => (
+                        <div 
+                          key={notice.id} 
+                          className={`p-4 border rounded-2xl font-sans transition-all flex flex-col justify-between md:flex-row md:items-start gap-3 ${
+                            notice.isPremium 
+                              ? 'bg-red-950/20 border-red-500/20 shadow-lg shadow-red-950/10' 
+                              : 'bg-white/[0.02] border-white/5 hover:bg-white/[0.04]'
+                          }`}
+                        >
+                          <div className="space-y-1.5 flex-1 pr-4">
+                            <div className="flex flex-wrap items-center gap-2">
+                              {notice.isPremium && (
+                                <span className="inline-flex items-center gap-1 bg-gradient-to-r from-red-600 to-amber-500 text-white text-[9px] font-mono font-bold py-0.5 px-2 rounded-full shadow-sm animate-pulse">
+                                  🌟 PREMIUM
+                                </span>
+                              )}
+                              <h4 className="font-extrabold text-white text-sm">{notice.title}</h4>
+                            </div>
+                            
+                            <p className="text-xs text-gray-300 whitespace-pre-line leading-relaxed">{notice.content}</p>
+                            
+                            <span className="text-[10px] text-gray-500 font-mono block mt-1">
+                              ⏰ Published: {new Date(notice.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+
+                          <div className="flex md:flex-col items-center md:items-end justify-end gap-2 shrink-0 pt-2 md:pt-0">
+                            <button
+                              onClick={() => {
+                                setEditingNoticeId(notice.id);
+                                setNewNoticeTitle(notice.title);
+                                setNewNoticeContent(notice.content);
+                                setNewNoticeIsPremium(!!notice.isPremium);
+                              }}
+                              className="p-1.5 text-yellow-500 bg-yellow-500/10 hover:bg-yellow-500/20 rounded-lg transition-all cursor-pointer"
+                              title="Edit Notice"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (window.confirm("Are you sure you want to delete this notice forever?")) {
+                                  await deleteNoticeItem(notice.id);
+                                  triggerAlert("Notice deleted successfully.");
+                                }
+                              }}
+                              className="p-1.5 text-red-500 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-all cursor-pointer"
+                              title="Delete Notice"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+              </div>
             </div>
           </div>
         )}

@@ -1,10 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import UserPanel from './components/UserPanel';
 import AdminPanel from './components/AdminPanel';
 import { Film, Compass, Settings, Shield } from 'lucide-react';
+import { verifyUserSubscriptions } from './lib/subscriptionService';
 
 export default function App() {
   const [view, setView] = useState<'user' | 'admin'>('user');
+
+  useEffect(() => {
+    // Run subscription verification check on startup
+    verifyUserSubscriptions()
+      .then((res) => {
+        if (res.expiredCount > 0) {
+          console.log(`✅ Automatically verified subscriptions: Downgraded ${res.expiredCount} expired user(s).`);
+        } else {
+          console.log("✅ Verified user subscriptions: All checks completed.");
+        }
+      })
+      .catch((err) => {
+        console.error("Subscription check failed on mount:", err);
+      });
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#070708] text-gray-100 flex flex-col no-scrollbar">

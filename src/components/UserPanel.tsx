@@ -4,18 +4,19 @@ import {
   Search, Bell, Menu, Home, MessageSquare, User, Bookmark, 
   PlayCircle, Tv, Film, Lock, Unlock, Settings, CreditCard, 
   X, ChevronRight, Info, Heart, Download, Globe, Sparkles, Check, AlertCircle, RefreshCw,
-  ArrowLeft, ExternalLink, Mail, Code, Laptop, Smartphone, Copy, Play, Maximize2
+  ArrowLeft, ExternalLink, Mail, Code, Laptop, Smartphone, Copy, Play, Maximize2, Megaphone
 } from 'lucide-react';
 import { 
   ContentItem, Episode, AppSettings, NotificationItem, 
   PaymentRequest, SupportSession, UserProfile, ContentCategory,
-  SLIDER_ANIMATIONS, WatchHistoryEntry
+  SLIDER_ANIMATIONS, WatchHistoryEntry, NoticeItem
 } from '../types';
 import { UserProfileComponent } from './UserProfileComponent';
 import { 
   subscribeContent, subscribeAppSettings, subscribeNotifications, subscribeContentFiltered,
   subscribeUserChat, sendMessage, submitPaymentRequest, clearChatSession, deleteChatSession, signInWithGoogle, customSignUp,
-  customSignIn, subscribeUserProfile, updateUserProfile, submitUserRating, subscribeUserRating, subscribeAuth, logOut
+  customSignIn, subscribeUserProfile, updateUserProfile, submitUserRating, subscribeUserRating, subscribeAuth, logOut,
+  subscribeNotices
 } from '../lib/firebaseStore';
 
 // Helper to parse YouTube URLs for embedding
@@ -139,6 +140,9 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   const [authConfirmPass, setAuthConfirmPass] = useState('');
   const [authName, setAuthName] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
+  const [unauthorizedDomainDetected, setUnauthorizedDomainDetected] = useState<string | null>(null);
+  const [popupClosedErrorDetected, setPopupClosedErrorDetected] = useState<boolean>(false);
+  const [activeFbUser, setActiveFbUser] = useState<any>(null);
 
   // Active movie viewing state
   const [viewingContent, setViewingContent] = useState<ContentItem | null>(null);
@@ -149,6 +153,10 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
 
   // Notification UI Toggle
   const [showNotifications, setShowNotifications] = useState(false);
+
+  // Noticeboard configuration
+  const [noticesList, setNoticesList] = useState<NoticeItem[]>([]);
+  const [showNoticeboardModal, setShowNoticeboardModal] = useState(false);
 
   // Premium Payment billing invoice modal
   const [paymentContent, setPaymentContent] = useState<ContentItem | null>(null);
@@ -392,6 +400,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     // Dynamic Firebase data sub for settings & notifications
     const unsubSettings = subscribeAppSettings((conf) => setSettings(conf));
     const unsubNotifications = subscribeNotifications((notifs) => setNotifications(notifs));
+    const unsubNotices = subscribeNotices((items) => setNoticesList(items));
 
     // Favorites Sync
     try {
@@ -402,6 +411,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     return () => {
       unsubSettings();
       unsubNotifications();
+      unsubNotices();
     };
   }, []);
 
@@ -485,6 +495,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
       }
 
       if (fbUser) {
+        setActiveFbUser(fbUser);
         // Intercept any administrative/development accounts to prevent automated login if they didn't log in explicitly as standard viewer/user
         const adminEmail = settings?.adminEmail?.trim().toLowerCase() || 'admin@popcornplay.com';
         const cleanEmail = fbUser.email?.trim().toLowerCase();
@@ -495,8 +506,22 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
         if (isAdminUser) {
           const manualEmail = localStorage.getItem('pp_user_manually_logged_in_email')?.trim().toLowerCase();
           if (manualEmail !== cleanEmail && !isGoogleLoggingIn) {
+            // Check if there was an active standard user session in progress
+            const cachedUserStr = localStorage.getItem('pp_current_user');
+            const isLogged = localStorage.getItem('pp_user_logged_in') === 'true';
+            
+            if (isLogged && cachedUserStr) {
+              try {
+                const cachedUser = JSON.parse(cachedUserStr);
+                // Keep the standard user session active locally!
+                setUserProfile(cachedUser);
+                return;
+              } catch (e) {}
+            }
+
             // Discard automatic sync of the admin account in the User Panel
             setUserProfile(null);
+            setActiveFbUser(null);
             localStorage.removeItem('pp_current_user');
             localStorage.setItem('pp_premium_user_status', 'false');
             localStorage.removeItem('pp_premium_until');
@@ -552,6 +577,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
         });
       } else {
         // No authenticated Firebase user.
+        setActiveFbUser(null);
         // We prevent automatic logging out inside iframe preview or after page refresh,
         // so we DO NOT wipe the session here. We only log out when the user explicitly clicks the Sign Out/Logout button!
       }
@@ -573,7 +599,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
       });
       return () => unsubChat();
     }
-  }, [userProfile?.uid]);
+  }, [userProfile?.uid, activeFbUser]);
 
   const getUserIdForRating = () => {
     if (userProfile?.uid) return userProfile.uid;
@@ -619,8 +645,32 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   };
 
   // Auth Operations
+  const handleLocalBypass = () => {
+    const cleanEmail = (authEmail || 'viewer@popcorn.com').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const uid = cleanEmail ? `local-usr-${cleanEmail}` : 'local-usr-guest';
+    
+    const dummyUser: UserProfile = {
+      uid: uid,
+      name: authName || 'Authorized Guest (Local)',
+      email: authEmail || 'guest@popcornplay.com',
+      isPremium: true, // Auto-unlock VIP Premium for local testing bypass!
+      favorites: []
+    };
+    
+    setUserProfile(dummyUser);
+    localStorage.setItem('pp_user_logged_in', 'true');
+    localStorage.setItem('pp_user_manually_logged_in_email', dummyUser.email);
+    localStorage.setItem('pp_current_user', JSON.stringify(dummyUser));
+    setAuthError(null);
+    setUnauthorizedDomainDetected(null);
+    setPopupClosedErrorDetected(false);
+    triggerAlert("Logged in under Local Guest mode with VIP Premium unlocked for testing! 👍");
+  };
+
   const handleGoogleLogin = async () => {
     try {
+      setPopupClosedErrorDetected(false);
+      setAuthError(null);
       localStorage.setItem('pp_google_logging_in', 'true');
       const profile = await signInWithGoogle();
       setUserProfile(profile);
@@ -629,9 +679,19 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
         localStorage.setItem('pp_user_manually_logged_in_email', profile.email.trim().toLowerCase());
       }
       localStorage.setItem('pp_current_user', JSON.stringify(profile));
+      setUnauthorizedDomainDetected(null);
       triggerAlert(`Welcome, ${profile.name}! Logged in via Google.`);
     } catch (err: any) {
-      setAuthError(err.message || 'Google Auth failed');
+      if (err.message && err.message.includes('unauthorized-domain')) {
+        setUnauthorizedDomainDetected(window.location.hostname);
+      }
+      if (err.code === 'auth/popup-closed-by-user' || err.message?.includes('popup-closed-by-user') || err.message?.includes('auth/popup-closed-by-user')) {
+        setPopupClosedErrorDetected(true);
+        triggerAlert("⚠️ গুগল সাইন-ইন উইন্ডো বন্ধ করা হয়েছে। পাসওয়ার্ড দিয়ে সাইন-ইন করুন বা গেস্ট মোডে প্রবেশ করুন।");
+        setAuthError("গুগল সাইন-ইন উইন্ডো বন্ধ করা হয়েছে (পপ-আপ ব্লক হতে পারে)। পাসওয়ার্ড দিয়ে সরাসরি সাইন-ইন বা রেজিস্টার করুন বা গেস্ট মোড ব্যবহার করুন।");
+      } else {
+        setAuthError(err.message || 'Google Auth failed');
+      }
     } finally {
       localStorage.removeItem('pp_google_logging_in');
     }
@@ -656,10 +716,14 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
         const profile = await customSignUp({ name: authName, email: authEmail, password: authPassword });
         setUserProfile(profile);
         localStorage.setItem('pp_current_user', JSON.stringify(profile));
+        setUnauthorizedDomainDetected(null);
         triggerAlert(`Welcome! Registered account for ${profile.name}`);
       } catch (err: any) {
         localStorage.removeItem('pp_user_logged_in');
         localStorage.removeItem('pp_user_manually_logged_in_email');
+        if (err.message && err.message.includes('unauthorized-domain')) {
+          setUnauthorizedDomainDetected(window.location.hostname);
+        }
         setAuthError(err.message || 'Registration failed');
         return; // Prevent resetting fields if registration fails
       }
@@ -674,10 +738,14 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
         const profile = await customSignIn(authEmail, authPassword);
         setUserProfile(profile);
         localStorage.setItem('pp_current_user', JSON.stringify(profile));
+        setUnauthorizedDomainDetected(null);
         triggerAlert(`Welcome back, ${profile.name}!`);
       } catch (err: any) {
         localStorage.removeItem('pp_user_logged_in');
         localStorage.removeItem('pp_user_manually_logged_in_email');
+        if (err.message && err.message.includes('unauthorized-domain')) {
+          setUnauthorizedDomainDetected(window.location.hostname);
+        }
         setAuthError(err.message || 'Login failed');
         return; // Prevent resetting fields if login fails
       }
@@ -692,8 +760,15 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
 
   const handleSignOut = async () => {
     try {
-      await logOut();
+      const isAdminLogged = localStorage.getItem('pp_admin_logged') === 'true';
+      if (!isAdminLogged) {
+        await logOut();
+      } else {
+        localStorage.removeItem('pp_premium_until');
+        localStorage.setItem('pp_premium_user_status', 'false');
+      }
       setUserProfile(null);
+      setActiveFbUser(null);
       localStorage.removeItem('pp_user_logged_in');
       localStorage.removeItem('pp_current_user');
       localStorage.removeItem('pp_user_manually_logged_in_email');
@@ -862,8 +937,13 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   // Floating Chat text submission
   const handleSendSupportMsg = async () => {
     if (!supportText.trim() || !userProfile) return;
-    await sendMessage(userProfile.uid, userProfile.name, userProfile.email, supportText.trim(), 'user');
-    setSupportText('');
+    try {
+      await sendMessage(userProfile.uid, userProfile.name, userProfile.email, supportText.trim(), 'user');
+    } catch (err) {
+      console.error("Failed to send message: ", err);
+    } finally {
+      setSupportText('');
+    }
   };
 
   // Filter content based on Category, Search bar text, and Parental toggles
@@ -1199,6 +1279,36 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                   </div>
                 </button>
               </div>
+            </div>
+
+            {/* Noticeboard Section */}
+            <div className="border-t border-white/5 mt-6 pt-5">
+              <span className="text-[10px] text-gray-500 font-mono tracking-wider block mb-2.5 px-1 uppercase">NEWS & RELEASES</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setDrawerOpen(false);
+                  setShowNoticeboardModal(true);
+                }}
+                className="w-full flex items-center justify-between p-3.5 bg-gradient-to-br from-indigo-950/20 to-indigo-900/10 hover:from-indigo-950/40 hover:to-indigo-900/20 border border-indigo-500/12 hover:border-indigo-500/35 rounded-xl transition-all text-left relative overflow-hidden group shadow-lg active:scale-[0.98] cursor-pointer"
+              >
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,0.1),transparent_50%)] pointer-events-none" />
+                <div className="flex items-center space-x-3 relative z-10">
+                  <div className="w-10 h-10 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400 group-hover:text-indigo-300 border border-indigo-500/15 group-hover:bg-indigo-500/20 transition-all">
+                    <Megaphone className="w-5 h-5 animate-bounce" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-black text-indigo-300 group-hover:text-white transition-colors duration-300 uppercase tracking-wide block">Official Noticeboard</span>
+                    <span className="text-[9px] text-indigo-400/90 font-mono tracking-wider uppercase block mt-0.5">নতুন আপডেট ও নোটিশবোর্ড</span>
+                  </div>
+                </div>
+                {noticesList.length > 0 && (
+                  <div className="flex items-center space-x-1 relative z-10">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500 animate-ping" />
+                    <span className="w-2 h-2 rounded-full bg-indigo-500 absolute" />
+                  </div>
+                )}
+              </button>
             </div>
 
             {/* Drawer Social Handles */}
@@ -2187,7 +2297,126 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                 <p className="text-xs text-gray-500 mt-1">Unlock bufferless direct HD streaming and saved library lists.</p>
               </div>
 
-              {authError && (
+              {unauthorizedDomainDetected && (
+                <div className="bg-[#1c1414] border border-red-500/25 rounded-2xl p-5 text-left space-y-4">
+                  <div className="flex items-start gap-2.5">
+                    <span className="text-lg mt-0.5">⚠️</span>
+                    <div>
+                      <h4 className="font-display font-black text-sm text-red-400 leading-tight">
+                        ডোমেইনটি Firebase-এ অনুমোদিত নয় (Domain whitelist needed)
+                      </h4>
+                      <p className="text-[11px] text-gray-400 mt-1 leading-relaxed">
+                        আপনার Firebase Authentication ডোমেইন ফিল্টারের কারণে ব্রাউজার থেকে এই রিকোয়েস্টটি ব্লক করা হয়েছে। এটি সমাধান করতে নিচের নির্দেশনাবলী অনুসরণ করুন:
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#0e0e0f] rounded-xl p-3.5 border border-white/5 space-y-2 text-[10px] text-gray-300 font-mono">
+                    <p className="text-red-400 font-bold mb-1">🔗 কপি করুন এবং Firebase এ যুক্ত করুন:</p>
+                    <div className="flex items-center justify-between gap-2 bg-[#141416] p-2 rounded border border-white/5">
+                      <span className="truncate select-all text-white font-semibold">
+                        {unauthorizedDomainDetected}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(unauthorizedDomainDetected);
+                          triggerAlert("Domain copied to clipboard! (ডোমেইন ক্লিপবোর্ডে কপি করা হয়েছে!)");
+                        }}
+                        className="bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded text-[9px] active:scale-[0.96] transition-all font-sans font-bold"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    {unauthorizedDomainDetected !== 'ais-pre-qaloltumpi6ju5ianlypcf-600178883008.asia-southeast1.run.app' && (
+                      <div className="flex items-center justify-between gap-2 bg-[#141416] p-2 rounded border border-white/5">
+                        <span className="truncate select-all text-white font-semibold">
+                          ais-pre-qaloltumpi6ju5ianlypcf-600178883008.asia-southeast1.run.app
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText("ais-pre-qaloltumpi6ju5ianlypcf-600178883008.asia-southeast1.run.app");
+                            triggerAlert("Preview domain copied to clipboard!");
+                          }}
+                          className="bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded text-[9px] active:scale-[0.96] transition-all font-sans font-bold"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="text-[10.5px] text-gray-400 leading-relaxed pl-1 space-y-1.5 list-none">
+                    <p className="font-semibold text-white">🛠️ সমাধান করার সহজ ধাপসমূহ:</p>
+                    <li className="flex gap-1.5"><span className="text-red-500 font-bold">১.</span> <span><strong>Firebase Console</strong> এ যান (https://console.firebase.google.com)</span></li>
+                    <li className="flex gap-1.5"><span className="text-red-500 font-bold">২.</span> <span>আপনার প্রজেক্ট সিলেক্ট করে বাম মেনু থেকে <strong>Build &gt; Authentication</strong> এ যান।</span></li>
+                    <li className="flex gap-1.5"><span className="text-red-500 font-bold">৩.</span> <span>ওপরের <strong>Settings</strong> ট্যাব থেকে বাম পাশের <strong>Authorized domains</strong> এ ঢুকুন।</span></li>
+                    <li className="flex gap-1.5"><span className="text-red-500 font-bold">৪.</span> <span><strong>Add domain</strong> এ ক্লিক করে ওপরের কপি করা ডোমেইন(গুলো) যুক্ত করে সেভ করুন।</span></li>
+                  </div>
+
+                  <div className="border-t border-white/5 pt-3.5 flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={handleLocalBypass}
+                      className="w-full bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/15 active:scale-[0.98] py-2.5 px-3 rounded-xl text-[10.5px] font-bold text-center transition-all shadow-sm"
+                    >
+                      🔓 গেস্ট মোডে প্রবেশ করুন (Offline Guest with Premium)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUnauthorizedDomainDetected(null)}
+                      className="w-full text-center text-gray-400 hover:text-white text-[11px] font-medium py-1.5 transition-all"
+                    >
+                      Dismiss Error
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {popupClosedErrorDetected && (
+                <div className="bg-[#1c1414] border border-red-500/25 rounded-2xl p-5 text-left space-y-4">
+                  <div className="flex items-start gap-2.5">
+                    <span className="text-lg mt-0.5">🌐</span>
+                    <div>
+                      <h4 className="font-display font-black text-sm text-red-400 leading-tight">
+                        গুগল লগইন পপ-আপ বন্ধ হয়ে গেছে (Google Pop-up Interrupted)
+                      </h4>
+                      <p className="text-[11.5px] text-gray-300 mt-1 leading-relaxed">
+                        ব্রাউজার পপ-আপ উইন্ডোটি বন্ধ হয়েছে অথবা আইফ্রেম (iframe) রেস্ট্রিকশনের কারণে অটোমেটিক ব্লক হয়ে গেছে। এটি সমাধান বা এড়িয়ে যেতে নিচের কোনো একটি উপায় বেছে নিন:
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-[10px] space-y-2 border-t border-b border-white/5 py-3">
+                    <p className="text-gray-400 font-semibold uppercase font-mono tracking-wider">💡 নিচের ৩টি উপায়ের যেকোনো একটি ট্রাই করুন:</p>
+                    <div className="space-y-1 text-gray-300">
+                      <p><strong className="text-red-400">উপায় ১ (সবচেয়ে নির্ভরযোগ্য):</strong> এই কার্ডের ইমেইল এবং পাসওয়ার্ড বক্স ব্যবহার করে সরাসরি <strong>Sign Up</strong> বা <strong>Login</strong> করুন। এতে কোনো পপ-আপ লাগে না এবং ১০০% কাজ করবে!</p>
+                      <p><strong className="text-red-400">উপায় ২:</strong> ব্রাউজারের একেবারে ওপরে ডান পাশের শেয়ার আইকনের পাশে "Open in static tab" বা "Open in new window" বাটনে চাপ দিয়ে অ্যাপটি নতুন ট্যাবে খুলুন, সেখানে গুগল লগইন সহজে কাজ করবে।</p>
+                      <p><strong className="text-red-400">উপায় ৩ (তাত্ক্ষণিক ট্রায়াল):</strong> নিচের বাটনে ক্লিক করে সরাসরি প্রিমিয়াম গেস্ট মোডে ঢুকে পড়ুন এবং ফিচারের মজা নিন!</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={handleLocalBypass}
+                      className="w-full bg-red-600 hover:bg-red-500 text-white font-bold active:scale-[0.98] py-2.5 px-3 rounded-xl text-[11px] text-center transition-all shadow-sm"
+                    >
+                      🔓 গেস্ট মোডে প্রবেশ করুন (Offline Guest with Premium)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPopupClosedErrorDetected(false)}
+                      className="w-full text-center text-gray-400 hover:text-white text-[11px] font-medium py-1"
+                    >
+                      Dismiss Instruction
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {authError && !unauthorizedDomainDetected && !popupClosedErrorDetected && (
                 <div className="bg-red-500/10 text-red-400 text-xs p-3.5 rounded-lg text-center border border-red-500/15">
                   {authError}
                 </div>
@@ -2501,6 +2730,97 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                 </form>
               </>
             )}
+
+          </div>
+        </div>
+      )}
+
+      {/* PREMIUM INTERACTIVE NOTICEBOARD BULLETIN MODAL */}
+      {showNoticeboardModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Backdrop blur */}
+          <div 
+            onClick={() => setShowNoticeboardModal(false)} 
+            className="fixed inset-0 bg-black/85 backdrop-blur-md transition-opacity duration-300"
+          />
+          
+          {/* Main Card Container */}
+          <div className="relative w-full max-w-2xl bg-[#08080a] border border-indigo-500/20 rounded-3xl p-6 md:p-8 animate-scale-up shadow-[0_0_50px_rgba(99,102,241,0.15)] max-h-[85vh] overflow-y-auto font-sans text-left no-scrollbar">
+            
+            {/* Glowing top line */}
+            <div className="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-indigo-500 to-transparent" />
+
+            {/* Header section */}
+            <div className="flex justify-between items-center pb-5 border-b border-white/5 mb-6">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/25">
+                  <Megaphone className="w-5 h-5 text-indigo-400 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white uppercase tracking-wider font-mono">Official Noticeboard</h3>
+                  <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest mt-0.5">পপকর্ন প্লে নোটিশ ও সিস্টেম আপডেট</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowNoticeboardModal(false)} 
+                className="p-2 hover:bg-white/5 rounded-full text-gray-400 hover:text-white transition-all cursor-pointer border border-white/5"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Notice Cards Stream */}
+            <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-1">
+              {noticesList.length === 0 ? (
+                <div className="text-center py-16 bg-black/30 border border-white/5 rounded-2xl">
+                  <Megaphone className="w-12 h-12 text-indigo-400/30 mx-auto mb-3 animate-bounce" />
+                  <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest">No Active Notices</h4>
+                  <p className="text-[11px] text-gray-500 mt-1">সব নোটিশ বা আপডেট সরাসরি এই বোর্ডে দেখতে পাবেন।</p>
+                </div>
+              ) : (
+                noticesList.map((notice) => (
+                  <div
+                    key={notice.id}
+                    className={`relative rounded-2xl border p-5 transition-all overflow-hidden ${
+                      notice.isPremium
+                        ? 'bg-gradient-to-br from-[#0c0c12] via-[#080512] to-[#040209] border-indigo-500/25 hover:border-indigo-500/40 shadow-[0_0_20px_rgba(99,102,241,0.06)]'
+                        : 'bg-black/40 border-white/5 hover:border-white/10'
+                    }`}
+                  >
+                    {notice.isPremium && (
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none" />
+                    )}
+
+                    <div className="flex justify-between items-start gap-4 pb-3.5 border-b border-white/5 relative z-10">
+                      <div>
+                        <h4 className="text-sm font-black text-white tracking-wide pr-6 uppercase leading-tight font-sans">
+                          {notice.title}
+                        </h4>
+                        <span className="text-[10px] text-gray-500 font-mono block mt-1">
+                          🗓️ Published: {new Date(notice.createdAt).toLocaleDateString('en', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date(notice.createdAt).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      
+                      {notice.isPremium && (
+                        <span className="inline-flex shrink-0 items-center gap-1.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[9px] font-mono px-2.5 py-0.5 rounded-full font-black uppercase tracking-wider">
+                          Premium Update ⭐
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-4 text-xs font-light text-gray-300 leading-relaxed font-sans whitespace-pre-wrap select-text relative z-10 pl-0.5">
+                      {notice.content}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Bottom Note */}
+            <div className="mt-6 pt-5 border-t border-white/5 flex items-center justify-between text-[10px] text-gray-500 font-mono">
+              <span>Popcorn Play System Live Sync</span>
+              <span className="text-indigo-400 font-bold uppercase">Beta v2.0</span>
+            </div>
 
           </div>
         </div>
@@ -2972,6 +3292,102 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                 className="w-full h-full object-contain"
               />
             )}
+          </div>
+        </div>
+      )}
+
+      {/* NOTICE BOARD POP-UP MODAL */}
+      {showNoticeboardModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Backdrop blur */}
+          <div 
+            onClick={() => setShowNoticeboardModal(false)} 
+            className="fixed inset-0 bg-black/85 backdrop-blur-md transition-opacity duration-300 animate-fade-in"
+          ></div>
+          
+          {/* Main Card Container */}
+          <div className="relative w-full max-w-lg bg-gradient-to-b from-[#0d0d10] via-[#09090b] to-[#040405] border border-red-500/25 rounded-3xl p-6 md:p-8 text-left animate-scale-up shadow-[0_0_60px_rgba(239,68,68,0.2)] max-h-[85vh] flex flex-col justify-start overflow-hidden font-sans">
+            
+            {/* Pulsing neon top accent */}
+            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-red-650 via-yellow-500 to-red-650 animate-pulse rounded-t-3xl" />
+
+            {/* Header */}
+            <div className="flex justify-between items-center pb-4 border-b border-white/5 shrink-0">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-red-650 to-amber-500 flex items-center justify-center shadow-lg">
+                  <Megaphone className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-display font-black text-lg text-white tracking-wide">Notice Board / নোটিশ বোর্ড</h3>
+                  <p className="text-gray-400 text-[10.5px] font-mono mt-0.5 uppercase tracking-wider">LATEST OFFICIAL BROADCASTS</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowNoticeboardModal(false)} 
+                className="p-1.5 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full transition-all cursor-pointer"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* List Content */}
+            <div className="flex-1 overflow-y-auto mt-4 pr-1 space-y-4 no-scrollbar">
+              {noticesList.length === 0 ? (
+                <div className="text-center py-12 bg-black/20 border border-white/5 rounded-2xl">
+                  <Megaphone className="w-8 h-8 text-gray-600 mx-auto mb-2 opacity-60" />
+                  <p className="text-xs text-gray-500 font-mono">নুতন কোনো নোটিশ নেই এই মূহুর্তে।</p>
+                </div>
+              ) : (
+                noticesList.map((notice) => (
+                  <div 
+                    key={notice.id} 
+                    className={`p-5 rounded-2xl border transition-all duration-300 relative overflow-hidden group ${
+                      notice.isPremium 
+                        ? 'bg-gradient-to-br from-red-950/25 via-red-950/10 to-transparent border-red-500/25 shadow-lg shadow-red-950/5' 
+                        : 'bg-white/[0.01] border-white/5 hover:bg-white/[0.02]'
+                    }`}
+                  >
+                    {notice.isPremium && (
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-red-650/5 rounded-full blur-xl pointer-events-none animate-pulse" />
+                    )}
+
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {notice.isPremium && (
+                          <span className="inline-flex items-center gap-1 bg-gradient-to-r from-red-600 to-amber-500 text-white text-[8px] font-mono font-bold py-0.5 px-2 rounded-full shadow-sm animate-pulse">
+                            🌟 PREMIUM NOTICE
+                          </span>
+                        )}
+                        <h4 className="font-extrabold text-white text-sm tracking-wide leading-snug group-hover:text-red-400 transition-colors">
+                          {notice.title}
+                        </h4>
+                      </div>
+
+                      <p className="text-xs text-gray-300 leading-relaxed font-sans whitespace-pre-line">
+                        {notice.content}
+                      </p>
+
+                      <div className="flex items-center justify-between text-[10px] text-gray-500 font-mono pt-3 border-t border-white/5 mt-1.5">
+                        <span>Popcorn Play System Update</span>
+                        <span>{new Date(notice.createdAt).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="pt-4 border-t border-white/5 shrink-0 text-center">
+              <button
+                onClick={() => setShowNoticeboardModal(false)}
+                className="w-full bg-gradient-to-r from-red-650 to-[#ef4444] hover:from-red-600 hover:to-red-500 text-white font-mono font-extrabold text-xs py-3.5 rounded-xl uppercase tracking-wider transition-all duration-300 shadow-md active:scale-[0.98] cursor-pointer"
+              >
+                Close Bulletin Board (বন্ধ করুন)
+              </button>
+            </div>
+
           </div>
         </div>
       )}

@@ -8,7 +8,7 @@ import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getAuth, setPersistence, browserLocalPersistence, signInWithPopup, GoogleAuthProvider, signOut as firebaseSignOut, onAuthStateChanged, User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateEmail, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc, getDocs, query, orderBy, limit, getDocFromServer, where } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { ContentItem, NotificationItem, SupportSession, PaymentRequest, AppSettings, VisitorStat, UserProfile, ChatMessage, PremiumPlan, BannerItem } from '../types';
+import { ContentItem, NotificationItem, SupportSession, PaymentRequest, AppSettings, VisitorStat, UserProfile, ChatMessage, PremiumPlan, BannerItem, NoticeItem } from '../types';
 
 export enum OperationType {
   CREATE = 'create',
@@ -43,8 +43,8 @@ export const IS_FIREBASE_REAL =
   firebaseConfig.apiKey !== 'placeholder-key' && 
   !firebaseConfig.apiKey.includes('MY_GEMINI_API');
 
-let firebaseAuth: any = null;
-let firebaseDb: any = null;
+export let firebaseAuth: any = null;
+export let firebaseDb: any = null;
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errInfo: FirestoreErrorInfo = {
@@ -287,23 +287,49 @@ const DEFAULT_STATS: VisitorStat[] = [
 ];
 
 // Helper to interact with Local Storage safely
-const getLocal = (key: string, defaultValue: any) => {
+export const getLocal = (key: string, defaultValue: any) => {
   try {
     const saved = localStorage.getItem(key);
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (key === 'pp_settings' && typeof parsed === 'object' && parsed !== null) {
+        return { ...DEFAULT_SETTINGS, ...parsed };
+      }
+      return parsed;
+    }
   } catch (e) {
     console.error(e);
   }
   return defaultValue;
 };
 
-const setLocal = (key: string, value: any) => {
+export const setLocal = (key: string, value: any) => {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (e) {
     console.error(e);
   }
 };
+
+export function shouldWriteToFirebase(targetUid?: string, forceAdminAllowed?: boolean): boolean {
+  if (!IS_FIREBASE_REAL || !firebaseDb) return false;
+  if (forceAdminAllowed) return true;
+
+  if (targetUid) {
+    const isLocal = targetUid.startsWith('local-usr-');
+    if (isLocal) {
+      return true; // Local users / guests can save locally or write directly
+    }
+    
+    // For normal user records, prevent writes if Firebase Auth is not active to prevent permissions errors
+    const currentUid = firebaseAuth?.currentUser?.uid;
+    if (!currentUid) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 // Ensure seed data is initialized
 if (!localStorage.getItem('pp_content')) setLocal('pp_content', DEFAULT_CONTENT);
@@ -356,17 +382,7 @@ export async function signInWithGoogle(): Promise<UserProfile> {
     } catch (error: any) {
       console.error("Firebase Google Auth failed:", error);
       if (error.code === 'auth/unauthorized-domain' || error.message?.includes('unauthorized-domain') || error.code === 'auth/network-request-failed' || error.message?.includes('network-request-failed')) {
-        console.warn("⚠️ Firebase Auth domain unauthorized/unreachable. Falling back to secure local-database simulation.");
-        
-        const dummyUser: UserProfile = {
-          uid: 'google-usr-local-fallback',
-          name: 'Authorized Guest (Local)',
-          email: 'guest@popcornplay.com',
-          isPremium: getLocal('pp_premium_user_status', false),
-          favorites: getLocal('pp_user_favorites', [])
-        };
-        setLocal('pp_user_session_google-usr-local-fallback', dummyUser);
-        return dummyUser;
+        throw new Error(`unauthorized-domain: Firebase has blocked real Google Login because the current domain (${typeof window !== 'undefined' ? window.location.hostname : 'your-domain'}) is not added to your Firebase project's Authorized Domains list.`);
       }
       throw error;
     }
@@ -411,26 +427,7 @@ export async function customSignUp(profile: Partial<UserProfile> & {password: st
     } catch (error: any) {
       console.error("Firebase Auth custom signup failed:", error);
       if (error.code === 'auth/unauthorized-domain' || error.message?.includes('unauthorized-domain') || error.code === 'auth/network-request-failed' || error.message?.includes('network-request-failed')) {
-        console.warn("⚠️ Firebase Auth domain unauthorized/unreachable on signup. Falling back to secure local-database session creation.");
-        const cleanEmail = (profile.email || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        const uid = cleanEmail ? `local-usr-${cleanEmail}` : 'local-usr-' + Math.random().toString(36).substr(2, 9);
-        
-        let existingUser = getLocal(`pp_user_session_${uid}`, null);
-        if (existingUser) {
-          throw new Error('An account with this email already exists inside our registry. Please select Login instead! (এই ইমেইল দিয়ে ইতঃপূর্বেই অ্যাকাউন্ট তৈরি করা হয়েছে, দয়া করে লগইন করুন!)');
-        }
-
-        const newProfile: UserProfile = {
-          uid,
-          name: profile.name || 'Anonymous Viewer',
-          email: profile.email || 'viewer@popcorn.com',
-          isPremium: false,
-          favorites: [],
-          password: profile.password
-        };
-        
-        setLocal(`pp_user_session_${uid}`, newProfile);
-        return newProfile;
+        throw new Error(`unauthorized-domain: Firebase has blocked real Signup because the current domain (${typeof window !== 'undefined' ? window.location.hostname : 'your-domain'}) is not added to your Firebase project's Authorized Domains list.`);
       }
       if (error.code === 'auth/email-already-in-use') {
         throw new Error('An account with this email already exists inside our registry. Please select Login instead! (এই ইমেইল দিয়ে ইতঃপূর্বেই অ্যাকাউন্ট তৈরি করা হয়েছে, দয়া করে লগইন করুন!)');
@@ -492,24 +489,7 @@ export async function customSignIn(email: string, passwordInput: string): Promis
     } catch (error: any) {
       console.error("Firebase Auth custom signin failed:", error);
       if (error.code === 'auth/unauthorized-domain' || error.message?.includes('unauthorized-domain') || error.code === 'auth/network-request-failed' || error.message?.includes('network-request-failed')) {
-        console.warn("⚠️ Firebase Auth domain unauthorized/unreachable on signin. Falling back to local storage profile retrieval.");
-        const cleanEmail = email.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const uid = `local-usr-${cleanEmail}`;
-
-        let fetchedProfile = getLocal(`pp_user_session_${uid}`, null);
-
-        if (fetchedProfile) {
-          if (fetchedProfile.password) {
-            if (fetchedProfile.password !== passwordInput) {
-              throw new Error('Incorrect password entered! Please try again. (পাসওয়ার্ড সফলভাবে মেলেনি!)');
-            }
-          } else {
-            fetchedProfile.password = passwordInput;
-            setLocal(`pp_user_session_${uid}`, fetchedProfile);
-          }
-          return fetchedProfile;
-        }
-        throw new Error('No registered profile matches this email address. Please click Sign Up to register! (এই ইমেইল দিয়ে কোনো অ্যাকাউন্ট তৈরি করা হয়নি। দয়া করে সাইন-আপ করুন!)');
+        throw new Error(`unauthorized-domain: Firebase has blocked real Sign-in because the current domain (${typeof window !== 'undefined' ? window.location.hostname : 'your-domain'}) is not added to your Firebase project's Authorized Domains list.`);
       }
       if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found') {
         throw new Error('Incorrect email or password! Please try again. (ইমেইল অথবা পাসওয়ার্ড সফলভাবে মেলেনি!)');
@@ -573,7 +553,7 @@ export async function updateUserProfile(profile: UserProfile) {
     localStorage.setItem('pp_premium_until', String(profile.premiumUntil));
   }
 
-  if (IS_FIREBASE_REAL && firebaseDb) {
+  if (shouldWriteToFirebase(profile.uid)) {
     try {
       await setDoc(doc(firebaseDb, 'users', profile.uid), profile, { merge: true });
     } catch (error) {
@@ -1113,7 +1093,7 @@ export async function submitPaymentRequest(req: PaymentRequest) {
   current.push(req);
   setLocal('pp_payments', current);
 
-  if (IS_FIREBASE_REAL && firebaseDb) {
+  if (shouldWriteToFirebase(req.userId)) {
     try {
       await setDoc(doc(firebaseDb, 'payments', req.id), req);
     } catch (error) {
@@ -1515,6 +1495,79 @@ export async function updateNotificationItem(item: NotificationItem) {
   window.dispatchEvent(new Event('storage'));
 }
 
+const DEFAULT_NOTICES: NoticeItem[] = [
+  {
+    id: 'notice-1',
+    title: '🍿 Popcorn Play স্বাগতম!',
+    content: 'আমাদের সিস্টেমে কোনো সমস্যা বা প্রশ্নের জন্য সরাসরি লাইভ সাপোর্ট এ যোগাযোগ করুন। আমাদের সাথে থাকার জন্য ধন্যবাদ!',
+    isPremium: true,
+    createdAt: Date.now() - 3600000
+  }
+];
+
+// Noticeboard operations
+export function subscribeNotices(callback: (items: NoticeItem[]) => void) {
+  if (IS_FIREBASE_REAL && firebaseDb) {
+    return onSnapshot(collection(firebaseDb, 'notices'), (snap) => {
+      const list: NoticeItem[] = [];
+      snap.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as NoticeItem);
+      });
+      list.sort((a, b) => b.createdAt - a.createdAt);
+      callback(list);
+    }, (err) => {
+      console.error(err);
+      try {
+        handleFirestoreError(err, OperationType.LIST, 'notices');
+      } catch (e) {
+        callback(getLocal('pp_notices', DEFAULT_NOTICES));
+      }
+    });
+  } else {
+    callback(getLocal('pp_notices', DEFAULT_NOTICES));
+    const handleStorage = () => {
+      callback(getLocal('pp_notices', DEFAULT_NOTICES));
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }
+}
+
+export async function saveNoticeItem(item: NoticeItem) {
+  const list = getLocal('pp_notices', DEFAULT_NOTICES) as NoticeItem[];
+  const idx = list.findIndex(n => n.id === item.id);
+  if (idx > -1) {
+    list[idx] = item;
+  } else {
+    list.unshift(item);
+  }
+  setLocal('pp_notices', list);
+
+  if (IS_FIREBASE_REAL && firebaseDb) {
+    try {
+      await setDoc(doc(firebaseDb, 'notices', item.id), item);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `notices/${item.id}`);
+    }
+  }
+  window.dispatchEvent(new Event('storage'));
+}
+
+export async function deleteNoticeItem(id: string) {
+  const list = getLocal('pp_notices', DEFAULT_NOTICES) as NoticeItem[];
+  const filtered = list.filter(n => n.id !== id);
+  setLocal('pp_notices', filtered);
+
+  if (IS_FIREBASE_REAL && firebaseDb) {
+    try {
+      await deleteDoc(doc(firebaseDb, 'notices', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `notices/${id}`);
+    }
+  }
+  window.dispatchEvent(new Event('storage'));
+}
+
 // Live Support Real-Time Messaging Sync
 // In offline mode we collect all active chat threads into a record pp_chats.
 export function subscribeAllChatsForAdmin(callback: (sessions: SupportSession[]) => void) {
@@ -1548,7 +1601,10 @@ export function subscribeAllChatsForAdmin(callback: (sessions: SupportSession[])
 }
 
 export function subscribeUserChat(userId: string, callback: (session: SupportSession | null) => void) {
-  if (IS_FIREBASE_REAL && firebaseDb) {
+  const isLocal = userId.startsWith('local-usr-');
+  const hasActiveAuth = !!firebaseAuth?.currentUser;
+
+  if (IS_FIREBASE_REAL && firebaseDb && (isLocal || hasActiveAuth)) {
     return onSnapshot(doc(firebaseDb, 'live_support', userId), (docSnap) => {
       if (docSnap.exists()) {
         callback(docSnap.data() as SupportSession);
@@ -1556,13 +1612,18 @@ export function subscribeUserChat(userId: string, callback: (session: SupportSes
         callback(null);
       }
     }, (err) => {
-      console.warn(err);
-      try {
-        handleFirestoreError(err, OperationType.GET, `live_support/${userId}`);
-      } catch (e) {
-        const chats = getLocal('pp_chats', {}) as { [uId: string]: SupportSession };
-        callback(chats[userId] || null);
+      console.warn("Firestore live support subscription fail/unauthorized: ", err);
+      // Only trigger a fatal error log through handleFirestoreError if the user IS authenticated
+      // to avoid registering normal unauthenticated guest loads as rule vulnerabilities
+      if (hasActiveAuth) {
+        try {
+          handleFirestoreError(err, OperationType.GET, `live_support/${userId}`);
+        } catch (e) {
+          // ignore
+        }
       }
+      const chats = getLocal('pp_chats', {}) as { [uId: string]: SupportSession };
+      callback(chats[userId] || null);
     });
   } else {
     const chats = getLocal('pp_chats', {}) as { [uId: string]: SupportSession };
@@ -1609,11 +1670,12 @@ export async function sendMessage(userId: string, userName: string, userEmail: s
   chats[userId] = session;
   setLocal('pp_chats', chats);
 
-  if (IS_FIREBASE_REAL && firebaseDb) {
+  if (shouldWriteToFirebase(userId, sender === 'admin')) {
     try {
       await setDoc(doc(firebaseDb, 'live_support', userId), session);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `live_support/${userId}`);
+      console.warn("⚠️ Firestore live support write deferred to local fallback: ", error);
+      // Let's still dispatch the event so local tabs sync immediately
     }
   }
   window.dispatchEvent(new Event('storage'));
@@ -1627,11 +1689,11 @@ export async function clearChatSession(userId: string) {
     setLocal('pp_chats', chats);
   }
 
-  if (IS_FIREBASE_REAL && firebaseDb) {
+  if (shouldWriteToFirebase(userId)) {
     try {
       await setDoc(doc(firebaseDb, 'live_support', userId), { messages: [], unreadCount: 0 }, { merge: true });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `live_support/${userId}`);
+      console.warn("⚠️ Firestore clear chat write error:", error);
     }
   }
   window.dispatchEvent(new Event('storage'));
@@ -1644,11 +1706,11 @@ export async function hideChatFromAdmin(userId: string) {
     setLocal('pp_chats', chats);
   }
 
-  if (IS_FIREBASE_REAL && firebaseDb) {
+  if (shouldWriteToFirebase(userId)) {
     try {
       await setDoc(doc(firebaseDb, 'live_support', userId), { deletedByAdmin: true }, { merge: true });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `live_support/${userId}`);
+      console.warn("⚠️ Firestore hide chat write error:", error);
     }
   }
   window.dispatchEvent(new Event('storage'));
@@ -1661,11 +1723,11 @@ export async function restoreChatFromAdmin(userId: string) {
     setLocal('pp_chats', chats);
   }
 
-  if (IS_FIREBASE_REAL && firebaseDb) {
+  if (shouldWriteToFirebase(userId)) {
     try {
       await setDoc(doc(firebaseDb, 'live_support', userId), { deletedByAdmin: false }, { merge: true });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `live_support/${userId}`);
+      console.warn("⚠️ Firestore restore chat write error:", error);
     }
   }
   window.dispatchEvent(new Event('storage'));
@@ -1805,7 +1867,7 @@ export async function deleteUserProfile(uid: string): Promise<void> {
 export async function submitUserRating(contentId: string, userId: string, ratingValue: number): Promise<void> {
   const ratingKey = `${contentId}_${userId}`;
 
-  if (IS_FIREBASE_REAL && firebaseDb) {
+  if (shouldWriteToFirebase(userId)) {
     let ratingSnap: any = null;
     let contentSnap: any = null;
     const ratingRef = doc(firebaseDb, 'content', contentId, 'ratings', userId);

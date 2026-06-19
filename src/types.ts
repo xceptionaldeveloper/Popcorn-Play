@@ -67,6 +67,14 @@ export interface NotificationItem {
   createdAt?: number;
 }
 
+export interface NoticeItem {
+  id: string;
+  title: string;
+  content: string;
+  isPremium: boolean; // Flag to indicate if notice is high priority / VIP or styled premium
+  createdAt: number;
+}
+
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'admin';
@@ -200,6 +208,7 @@ export interface UserProfile {
   pinVerified?: boolean;
   isAdmin?: boolean;
   premiumUntil?: number | null;
+  expirationDate?: any; // Expiration date (can be string, timestamp, or object)
   password?: string;
   watchHistory?: WatchHistoryEntry[];
   parentalEnabled?: boolean;

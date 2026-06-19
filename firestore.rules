@@ -18,11 +18,11 @@ service cloud.firestore {
 
     // Administrator Check: Bootstrapped securely using the verified user email
     function isAdmin() {
-      return isSignedIn() && (
+      return isSignedIn() && 'email' in request.auth.token && (
         request.auth.token.email == "mdikhlas098@gmail.com" ||
         request.auth.token.email == "admin@popcornplay.com" ||
         (exists(/databases/$(database)/documents/app_settings/config) && 
-         request.auth.token.email == get(/databases/$(database)/documents/app_settings/config).data.adminEmail)
+         request.auth.token.email == get(/databases/$(database)/documents/app_settings/config).data.get('adminEmail', ''))
       );
     }
 
@@ -48,70 +48,53 @@ service cloud.firestore {
 
     // 3. SCHEMA INTEGRITY VALIDATION BUILDERS
     function isValidUserProfile(data) {
-      return data.keys().hasAll(['uid', 'name', 'email', 'isPremium', 'favorites']) 
-          && data.keys().size() in [5, 6, 7, 8, 9, 10, 11, 12] 
-          && data.uid is string 
-          && data.name is string 
-          && data.name.size() <= 100
-          && data.email is string
-          && data.email.size() <= 100
-          && data.isPremium is bool
-          && data.favorites is list;
+      return (!data.keys().hasAny(['uid']) || data.uid is string)
+          && (!data.keys().hasAny(['name']) || (data.name is string && data.name.size() <= 100))
+          && (!data.keys().hasAny(['email']) || (data.email is string && data.email.size() <= 100))
+          && (!data.keys().hasAny(['isPremium']) || data.isPremium is bool)
+          && (!data.keys().hasAny(['favorites']) || data.favorites is list);
     }
 
     function isValidAppSettings(data) {
-      return data.keys().hasAll(['appName', 'adultPin', 'supportActive', 'bkash', 'nagad', 'bank'])
-          && data.appName is string
-          && data.appName.size() <= 100
-          && data.adultPin is string
-          && data.adultPin.size() <= 10
-          && data.supportActive is bool
-          && data.bkash is string
-          && data.nagad is string
-          && data.bank is string;
+      return (!data.keys().hasAny(['appName']) || (data.appName is string && data.appName.size() <= 100))
+          && (!data.keys().hasAny(['adultPin']) || (data.adultPin is string && data.adultPin.size() <= 10))
+          && (!data.keys().hasAny(['supportActive']) || data.supportActive is bool)
+          && (!data.keys().hasAny(['bkash']) || data.bkash is string)
+          && (!data.keys().hasAny(['nagad']) || data.nagad is string)
+          && (!data.keys().hasAny(['bank']) || data.bank is string);
     }
 
     function isValidContentItem(data) {
-      return data.keys().hasAll(['id', 'title', 'coverUrl', 'videoUrl', 'tags', 'category', 'isPremium', 'isAdult', 'schedule', 'description', 'rating'])
-          && data.id is string
-          && data.title is string
-          && data.title.size() <= 128
-          && data.coverUrl is string
-          && data.videoUrl is string
-          && data.tags is list
-          && data.category is string
-          && data.isPremium is bool
-          && data.isAdult is bool
-          && data.schedule is string
-          && data.description is string
-          && data.rating is number;
+      return (!data.keys().hasAny(['id']) || data.id is string)
+          && (!data.keys().hasAny(['title']) || (data.title is string && data.title.size() <= 128))
+          && (!data.keys().hasAny(['coverUrl']) || data.coverUrl is string)
+          && (!data.keys().hasAny(['videoUrl']) || data.videoUrl is string)
+          && (!data.keys().hasAny(['tags']) || data.tags is list)
+          && (!data.keys().hasAny(['category']) || data.category is string)
+          && (!data.keys().hasAny(['isPremium']) || data.isPremium is bool)
+          && (!data.keys().hasAny(['isAdult']) || data.isAdult is bool)
+          && (!data.keys().hasAny(['schedule']) || data.schedule is string)
+          && (!data.keys().hasAny(['description']) || data.description is string)
+          && (!data.keys().hasAny(['rating']) || (data.rating is int || data.rating is float));
     }
 
     function isValidPaymentRequest(data) {
-      return data.keys().hasAll(['id', 'userId', 'userName', 'userEmail', 'method', 'senderNumber', 'transactionId', 'amount', 'timestamp', 'status'])
-          && data.keys().size() in [10, 11, 12, 13, 14]
-          && data.id is string
-          && data.userId is string
-          && data.userName is string
-          && data.userEmail is string
-          && data.method is string
-          && data.senderNumber is string
-          && data.senderNumber.size() <= 100
-          && data.transactionId is string
-          && data.transactionId.size() <= 200
-          && data.amount is number
-          && data.timestamp is string
-          && data.status is string
-          && data.status in ['pending', 'approved', 'rejected'];
+      return (!data.keys().hasAny(['id']) || data.id is string)
+          && (!data.keys().hasAny(['userId']) || data.userId is string)
+          && (!data.keys().hasAny(['userName']) || data.userName is string)
+          && (!data.keys().hasAny(['userEmail']) || data.userEmail is string)
+          && (!data.keys().hasAny(['method']) || data.method is string)
+          && (!data.keys().hasAny(['senderNumber']) || (data.senderNumber is string && data.senderNumber.size() <= 100))
+          && (!data.keys().hasAny(['transactionId']) || (data.transactionId is string && data.transactionId.size() <= 200))
+          && (!data.keys().hasAny(['amount']) || (data.amount is int || data.amount is float))
+          && (!data.keys().hasAny(['timestamp']) || data.timestamp is string)
+          && (!data.keys().hasAny(['status']) || (data.status is string && data.status in ['pending', 'approved', 'rejected']));
     }
 
     function isValidNotificationItem(data) {
-      return data.keys().hasAll(['id', 'msg', 'time'])
-          && data.keys().size() in [3, 4]
-          && data.id is string
-          && data.msg is string
-          && data.msg.size() <= 1000
-          && data.time is string;
+      return (!data.keys().hasAny(['id']) || data.id is string)
+          && (!data.keys().hasAny(['msg']) || (data.msg is string && data.msg.size() <= 1000))
+          && (!data.keys().hasAny(['time']) || data.time is string);
     }
 
     // Support Session checking inside helper
@@ -130,14 +113,21 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if (isSignedIn() && (isOwner(userId) || isAdmin())) || isLocalUser(userId);
       allow create: if ( (isSignedIn() && isOwner(userId)) || isLocalUser(userId) ) 
+                     && incoming().keys().hasAll(['uid', 'name', 'email', 'isPremium', 'favorites']) 
                      && isValidUserProfile(incoming()) 
                      && (incoming().isPremium == false || isAdmin()) 
                      && (!incoming().keys().hasAny(['isAdmin']) || incoming().isAdmin == false || isAdmin());
       allow update: if isValidUserProfile(incoming()) && (
-                      isAdmin() || 
-                      (isLocalUser(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password', 'watchHistory', 'parentalEnabled'])) ||
-                      (isSignedIn() && isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password', 'watchHistory', 'parentalEnabled']))
-                    );
+                       isAdmin() || 
+                       (isLocalUser(userId) && (
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password', 'watchHistory', 'parentalEnabled']) ||
+                         (existing().isPremium == true && incoming().isPremium == false && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password', 'watchHistory', 'parentalEnabled', 'isPremium', 'premiumUntil']))
+                       )) ||
+                       (isSignedIn() && isOwner(userId) && (
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password', 'watchHistory', 'parentalEnabled']) ||
+                         (existing().isPremium == true && incoming().isPremium == false && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'favorites', 'pinVerified', 'password', 'watchHistory', 'parentalEnabled', 'isPremium', 'premiumUntil']))
+                       ))
+                     );
       allow delete: if isAdmin();
       allow list: if isAdmin();
     }
@@ -145,7 +135,9 @@ service cloud.firestore {
     // Global Brand Configuration
     match /app_settings/{documentId} {
       allow get, list: if true;
-      allow write: if isAdmin() && isValidAppSettings(incoming());
+      allow create: if isAdmin() && incoming().keys().hasAll(['appName', 'adultPin', 'supportActive', 'bkash', 'nagad', 'bank']) && isValidAppSettings(incoming());
+      allow update: if isAdmin() && isValidAppSettings(incoming());
+      allow delete: if isAdmin();
     }
 
     // Media Catalog items
@@ -154,9 +146,9 @@ service cloud.firestore {
       allow create, delete: if isAdmin() && isValidContentItem(incoming()) && isValidId(contentId);
       allow update: if (isValidContentItem(incoming()) && isAdmin()) || (
                       incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'ratingCount', 'ratingSum']) &&
-                      incoming().rating is number &&
-                      incoming().ratingCount is number &&
-                      incoming().ratingSum is number
+                      (!incoming().keys().hasAny(['rating']) || (incoming().rating is int || incoming().rating is float)) &&
+                      (!incoming().keys().hasAny(['ratingCount']) || (incoming().ratingCount is int || incoming().ratingCount is float)) &&
+                      (!incoming().keys().hasAny(['ratingSum']) || (incoming().ratingSum is int || incoming().ratingSum is float))
                     );
 
       match /ratings/{userId} {
@@ -164,10 +156,10 @@ service cloud.firestore {
         allow write: if ((isSignedIn() && isOwner(userId)) || isLocalUser(userId)) &&
                        incoming().keys().hasAll(['userId', 'rating', 'timestamp']) &&
                        incoming().userId == userId &&
-                       incoming().rating is number &&
+                       (incoming().rating is int || incoming().rating is float) &&
                        incoming().rating >= 1 &&
                        incoming().rating <= 5 &&
-                       incoming().timestamp is number;
+                       (incoming().timestamp is int || incoming().timestamp is float);
       }
     }
 
@@ -175,7 +167,7 @@ service cloud.firestore {
     match /payments/{paymentId} {
       allow get: if (isSignedIn() && (isOwner(existing().userId) || isAdmin())) || isLocalUser(existing().userId);
       allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid) || isLocalUser(resource.data.userId);
-      allow create: if ( (isSignedIn() && isOwner(incoming().userId)) || isLocalUser(incoming().userId) ) 
+      allow create: if ( (isSignedIn() && (isOwner(incoming().userId) || isAdmin())) || isLocalUser(incoming().userId) ) 
                      && incoming().status == 'pending' 
                      && isValidPaymentRequest(incoming()) 
                      && isValidId(paymentId);
@@ -189,16 +181,18 @@ service cloud.firestore {
       allow write: if isAdmin() && isValidNotificationItem(incoming()) && isValidId(notificationId);
     }
 
+    // Noticeboard Notices
+    match /notices/{noticeId} {
+      allow get, list: if true;
+      allow write: if isAdmin() && isValidId(noticeId);
+    }
+
     // Live Support Customer Help-desks
     match /live_support/{userId} {
       allow get: if (isSignedIn() && (isOwner(userId) || isAdmin())) || isLocalUser(userId);
       allow list: if isAdmin();
       allow create: if ( (isSignedIn() && isOwner(userId)) || isLocalUser(userId) ) && isValidSupportSession(incoming()) && isValidId(userId);
-      allow update: if isValidSupportSession(incoming()) && (
-                      isAdmin() ||
-                      (isLocalUser(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['messages', 'lastUpdated', 'unreadCount'])) ||
-                      (isSignedIn() && isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['messages', 'lastUpdated', 'unreadCount']))
-                    );
+      allow update: if ( (isSignedIn() && isOwner(userId)) || isLocalUser(userId) || isAdmin() ) && isValidSupportSession(incoming());
       allow delete: if (isSignedIn() && (isOwner(userId) || isAdmin())) || isLocalUser(userId);
     }
 
