@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Film, Tv, MessageSquare, DollarSign, Settings, Sparkles, 
   Plus, Trash2, Edit2, Check, X, ShieldAlert, Calendar, 
@@ -51,6 +51,16 @@ export default function AdminPanel() {
   const [chatSessions, setChatSessions] = useState<SupportSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
+
+  const adminChatEndRef = useRef<HTMLDivElement>(null);
+  const currentChatSession = chatSessions.find(s => s.userId === activeChatId);
+
+  // Auto-scroll admin chat viewport smoothly when receiving new user messages
+  useEffect(() => {
+    if (adminChatEndRef.current) {
+      adminChatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [currentChatSession?.messages?.length, activeChatId, activeTab]);
   
   // Analytics
   const [visitorStats, setVisitorStats] = useState<VisitorStat[]>([]);
@@ -1234,8 +1244,6 @@ export default function AdminPanel() {
   const dramaCount = content.filter(c => c.category === 'Drama').length;
   const cartoonCount = content.filter(c => c.category === 'Cartoon').length;
   const serialCount = content.filter(c => c.category === 'Serial').length;
-
-  const currentChatSession = chatSessions.find(s => s.userId === activeChatId);
 
   if (!isAdminLoggedIn) {
     return (
@@ -3136,10 +3144,42 @@ export default function AdminPanel() {
                             </div>
                           ))
                         )}
+                        <div ref={adminChatEndRef} />
+                      </div>
+
+                      {/* Admin Quick Response Canned Presets */}
+                      <div className="mt-4">
+                        <span className="text-[10px] font-mono text-gray-500 uppercase tracking-widest block mb-2">⚡ Quick Canned Responses</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            onClick={() => setReplyText("Welcome! To unlock VIP instant premium access, select your duration in your Profile tab, make the correct BDT payment and submit the secure form. Admins verify submissions in 5-15 mins!")}
+                            className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-2.5 py-1.5 rounded-lg text-[10px] font-mono transition-all cursor-pointer"
+                          >
+                            ⭐ VIP Inquiry
+                          </button>
+                          <button
+                            onClick={() => setReplyText("Greetings! We've successfully matched your Sender Number and Transaction ID payload. Your VIP subscription has been successfully provisioned. Thank you for supporting Popcorn Play!")}
+                            className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-2.5 py-1.5 rounded-lg text-[10px] font-mono transition-all cursor-pointer"
+                          >
+                            ✅ VIP Confirm
+                          </button>
+                          <button
+                            onClick={() => setReplyText("For streaming/buffering issues, please use the Gear Icon in the video player to switch between dynamic mirror chains, or fallback Quality to 480p/720p. Our server nodes are fully optimized!")}
+                            className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 px-2.5 py-1.5 rounded-lg text-[10px] font-mono transition-all cursor-pointer"
+                          >
+                            ⚙️ Buffer Fix
+                          </button>
+                          <button
+                            onClick={() => setReplyText("Thank you for your valuable request! Your requested title is added to our media ingest logs. Our curation team will compile and update corresponding high speed stream mirrors shortly.")}
+                            className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 px-2.5 py-1.5 rounded-lg text-[10px] font-mono transition-all cursor-pointer"
+                          >
+                            🎬 Show Request
+                          </button>
+                        </div>
                       </div>
 
                       {/* Send bar */}
-                      <div className="mt-4 pt-3 border-t border-white/5 flex items-center space-x-2">
+                      <div className="mt-2 pt-3 border-t border-white/5 flex items-center space-x-2">
                         <input
                           type="text"
                           placeholder="Type your official support response..."

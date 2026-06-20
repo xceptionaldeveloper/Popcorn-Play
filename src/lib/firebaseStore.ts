@@ -524,12 +524,15 @@ export async function customSignIn(email: string, passwordInput: string): Promis
 
 export async function logOut(): Promise<void> {
   localStorage.removeItem('pp_premium_until');
+  localStorage.removeItem('pp_chats'); // Wipes custom support external session logs on logout
   if (typeof window !== 'undefined') {
     localStorage.setItem('pp_premium_user_status', 'false');
   }
   if (IS_FIREBASE_REAL && firebaseAuth) {
     await firebaseSignOut(firebaseAuth);
   }
+  window.dispatchEvent(new Event('storage'));
+  window.dispatchEvent(new Event('pp_chats_updated'));
 }
 
 export function subscribeAuth(callback: (user: any) => void) {
@@ -1568,74 +1571,45 @@ export async function deleteNoticeItem(id: string) {
   window.dispatchEvent(new Event('storage'));
 }
 
-// Live Support Real-Time Messaging Sync
-// In offline mode we collect all active chat threads into a record pp_chats.
+// Live Support Real-Time Messaging Sync (Fully external from Firebase)
 export function subscribeAllChatsForAdmin(callback: (sessions: SupportSession[]) => void) {
-  if (IS_FIREBASE_REAL && firebaseDb) {
-    return onSnapshot(collection(firebaseDb, 'live_support'), (snap) => {
-      const list: SupportSession[] = [];
-      snap.forEach((doc) => {
-        list.push({ userId: doc.id, ...doc.data() } as SupportSession);
-      });
-      callback(list);
-    }, (err) => {
-      console.warn(err);
-      try {
-        handleFirestoreError(err, OperationType.LIST, 'live_support');
-      } catch (e) {
-        const chats = getLocal('pp_chats', {}) as { [userId: string]: SupportSession };
-        callback(Object.values(chats));
-      }
-    });
-  } else {
+  const getChats = () => {
     const chats = getLocal('pp_chats', {}) as { [userId: string]: SupportSession };
-    callback(Object.values(chats));
-    
-    const handleStorage = () => {
-      const updated = getLocal('pp_chats', {}) as { [userId: string]: SupportSession };
-      callback(Object.values(updated));
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }
+    return Object.values(chats);
+  };
+
+  callback(getChats());
+  
+  const handleStorage = () => {
+    callback(getChats());
+  };
+  
+  window.addEventListener('storage', handleStorage);
+  window.addEventListener('pp_chats_updated', handleStorage);
+  return () => {
+    window.removeEventListener('storage', handleStorage);
+    window.removeEventListener('pp_chats_updated', handleStorage);
+  };
 }
 
 export function subscribeUserChat(userId: string, callback: (session: SupportSession | null) => void) {
-  const isLocal = userId.startsWith('local-usr-');
-  const hasActiveAuth = !!firebaseAuth?.currentUser;
-
-  if (IS_FIREBASE_REAL && firebaseDb && (isLocal || hasActiveAuth)) {
-    return onSnapshot(doc(firebaseDb, 'live_support', userId), (docSnap) => {
-      if (docSnap.exists()) {
-        callback(docSnap.data() as SupportSession);
-      } else {
-        callback(null);
-      }
-    }, (err) => {
-      console.warn("Firestore live support subscription fail/unauthorized: ", err);
-      // Only trigger a fatal error log through handleFirestoreError if the user IS authenticated
-      // to avoid registering normal unauthenticated guest loads as rule vulnerabilities
-      if (hasActiveAuth) {
-        try {
-          handleFirestoreError(err, OperationType.GET, `live_support/${userId}`);
-        } catch (e) {
-          // ignore
-        }
-      }
-      const chats = getLocal('pp_chats', {}) as { [uId: string]: SupportSession };
-      callback(chats[userId] || null);
-    });
-  } else {
+  const getChat = () => {
     const chats = getLocal('pp_chats', {}) as { [uId: string]: SupportSession };
-    callback(chats[userId] || null);
-    
-    const handleStorage = () => {
-      const updated = getLocal('pp_chats', {}) as { [uId: string]: SupportSession };
-      callback(updated[userId] || null);
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }
+    return chats[userId] || null;
+  };
+
+  callback(getChat());
+  
+  const handleStorage = () => {
+    callback(getChat());
+  };
+  
+  window.addEventListener('storage', handleStorage);
+  window.addEventListener('pp_chats_updated', handleStorage);
+  return () => {
+    window.removeEventListener('storage', handleStorage);
+    window.removeEventListener('pp_chats_updated', handleStorage);
+  };
 }
 
 export async function sendMessage(userId: string, userName: string, userEmail: string, text: string, sender: 'user' | 'admin') {
@@ -1645,7 +1619,7 @@ export async function sendMessage(userId: string, userName: string, userEmail: s
     userName,
     userEmail,
     messages: [],
-    lastUpdated: new Date().toLocaleTimeString(),
+    lastUpdated: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     unreadCount: 0
   };
   
@@ -1670,15 +1644,8 @@ export async function sendMessage(userId: string, userName: string, userEmail: s
   chats[userId] = session;
   setLocal('pp_chats', chats);
 
-  if (shouldWriteToFirebase(userId, sender === 'admin')) {
-    try {
-      await setDoc(doc(firebaseDb, 'live_support', userId), session);
-    } catch (error) {
-      console.warn("⚠️ Firestore live support write deferred to local fallback: ", error);
-      // Let's still dispatch the event so local tabs sync immediately
-    }
-  }
   window.dispatchEvent(new Event('storage'));
+  window.dispatchEvent(new Event('pp_chats_updated'));
 }
 
 export async function clearChatSession(userId: string) {
@@ -1688,15 +1655,8 @@ export async function clearChatSession(userId: string) {
     chats[userId].unreadCount = 0;
     setLocal('pp_chats', chats);
   }
-
-  if (shouldWriteToFirebase(userId)) {
-    try {
-      await setDoc(doc(firebaseDb, 'live_support', userId), { messages: [], unreadCount: 0 }, { merge: true });
-    } catch (error) {
-      console.warn("⚠️ Firestore clear chat write error:", error);
-    }
-  }
   window.dispatchEvent(new Event('storage'));
+  window.dispatchEvent(new Event('pp_chats_updated'));
 }
 
 export async function hideChatFromAdmin(userId: string) {
@@ -1705,15 +1665,8 @@ export async function hideChatFromAdmin(userId: string) {
     chats[userId].deletedByAdmin = true;
     setLocal('pp_chats', chats);
   }
-
-  if (shouldWriteToFirebase(userId)) {
-    try {
-      await setDoc(doc(firebaseDb, 'live_support', userId), { deletedByAdmin: true }, { merge: true });
-    } catch (error) {
-      console.warn("⚠️ Firestore hide chat write error:", error);
-    }
-  }
   window.dispatchEvent(new Event('storage'));
+  window.dispatchEvent(new Event('pp_chats_updated'));
 }
 
 export async function restoreChatFromAdmin(userId: string) {
@@ -1722,15 +1675,8 @@ export async function restoreChatFromAdmin(userId: string) {
     chats[userId].deletedByAdmin = false;
     setLocal('pp_chats', chats);
   }
-
-  if (shouldWriteToFirebase(userId)) {
-    try {
-      await setDoc(doc(firebaseDb, 'live_support', userId), { deletedByAdmin: false }, { merge: true });
-    } catch (error) {
-      console.warn("⚠️ Firestore restore chat write error:", error);
-    }
-  }
   window.dispatchEvent(new Event('storage'));
+  window.dispatchEvent(new Event('pp_chats_updated'));
 }
 
 export async function deleteChatSession(userId: string) {
@@ -1739,15 +1685,8 @@ export async function deleteChatSession(userId: string) {
     delete chats[userId];
     setLocal('pp_chats', chats);
   }
-
-  if (IS_FIREBASE_REAL && firebaseDb) {
-    try {
-      await deleteDoc(doc(firebaseDb, 'live_support', userId));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `live_support/${userId}`);
-    }
-  }
   window.dispatchEvent(new Event('storage'));
+  window.dispatchEvent(new Event('pp_chats_updated'));
 }
 
 // Visitor stats polling for Chart.js/Recharts mapping

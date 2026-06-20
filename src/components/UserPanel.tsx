@@ -417,6 +417,14 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   const [alertMsg, setAlertMsg] = useState<string | null>(null);
 
   const watchSectionRef = useRef<HTMLDivElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Smooth scroll support chat viewport automatically whenever new messages arrive
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatSession?.messages?.length, activeTab]);
 
   // Auto-close delay handler for popups
   useEffect(() => {
@@ -972,6 +980,25 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
       console.error("Failed to send message: ", err);
     } finally {
       setSupportText('');
+    }
+  };
+
+  // Click handler to post FAQ question text and obtain an immediate automated expert bot response
+  const handleQuickQuestionClick = async (question: string, replyAnswer: string) => {
+    if (!userProfile) return;
+    try {
+      await sendMessage(userProfile.uid, userProfile.name, userProfile.email, question, 'user');
+      setTimeout(async () => {
+        await sendMessage(
+          userProfile.uid,
+          userProfile.name,
+          userProfile.email,
+          `🤖 [AUTO HELPDESK BOT] \n${replyAnswer}`,
+          'admin'
+        );
+      }, 1000);
+    } catch (e) {
+      console.error("Failed to handle quick FAQ message: ", e);
     }
   };
 
@@ -2283,6 +2310,50 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                     </div>
                   ))
                 )}
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* Interactive Quick FAQ Assist Tray */}
+              <div className="px-3 pt-2 bg-black/30 border-t border-white/5">
+                <span className="text-[9px] font-mono text-gray-500 uppercase tracking-widest block mb-1 px-1">⚡ Instant Answers / প্রশ্ন সিলেক্ট করুন</span>
+                <div className="flex space-x-1.5 overflow-x-auto pb-2 no-scrollbar scroll-smooth">
+                  <button
+                    onClick={() => handleQuickQuestionClick(
+                      "কিভাবে VIP প্রিমিয়াম মেম্বারশিপ কিনবো? (How to buy VIP subscription?)",
+                      "VIP মেম্বার হতে প্রথমে 'Profile' অপশনে যান। সেখান থেকে আপনার পছন্দসই প্রিমিয়াম প্ল্যান সিলেক্ট করে বিকাশ বা রকেটে নির্দিষ্ট পরিমাণ টাকা সেন্ড মানি করুন। এরপর সঠিক Sender Number এবং Transaction ID ফর্মে বসিয়ে সাবমিট করলেই এডমিন ভেরিফাই করে ৫-১৫ মিনিটের মধ্যে আপনার VIP একটিভ করে দেবে। ধন্যবাদ!"
+                    )}
+                    className="shrink-0 bg-red-600/10 hover:bg-red-650/20 text-red-400 border border-red-500/15 px-3 py-1.5 rounded-xl text-[10px] font-sans font-bold transition-all cursor-pointer"
+                  >
+                    💎 Buy VIP Premium
+                  </button>
+                  <button
+                    onClick={() => handleQuickQuestionClick(
+                      "টাকা পাঠিয়েছি কিন্তু VIP মেম্বারশিপ একটিভ হয়নি কেন? (Why is VIP not active after payment?)",
+                      "সাধারণত এডমিন প্যানেল থেকে ট্রানজেকশন আইডি মিলিয়ে দেখতে ৫ থেকে ১৫ মিনিট সময় লাগে। যদি অনেকক্ষণ পেরিয়ে যায়, দয়া করে আবার আপনার সঠিক Transaction ID এবং সঠিক Sender Number দিয়ে সাবমিট রিকোয়েস্টটি পুনরায় পাঠান অথবা এখানে মেসেজ দিয়ে রাখুন। ধন্যবাদ!"
+                    )}
+                    className="shrink-0 bg-emerald-600/10 hover:bg-emerald-650/20 text-emerald-400 border border-emerald-500/15 px-3 py-1.5 rounded-xl text-[10px] font-sans font-bold transition-all cursor-pointer"
+                  >
+                    ⏱️ Check Payment Status
+                  </button>
+                  <button
+                    onClick={() => handleQuickQuestionClick(
+                      "প্লেয়ারে ভিডিও লোড না হলে বা বাফার করলে করনীয় কি? (How to fix video buffering?)",
+                      "বাফারিং এড়াতে প্লেয়ারে থাকা গিয়ার আইকনে ক্লিক করে ডাইনামিক মিরর সার্ভার পরিবর্তন করতে পারেন অথবা কোয়ালিটি কমিয়ে (যেমন: 480p বা 720p) দিয়ে নির্বিঘ্নে উপভোগ করুন। আমাদের হাই স্পিড ডেডিকেটেড নোড সবসময় সচল থাকে।"
+                    )}
+                    className="shrink-0 bg-amber-600/10 hover:bg-amber-655/20 text-amber-400 border border-amber-500/15 px-3 py-1.5 rounded-xl text-[10px] font-sans font-bold transition-all cursor-pointer"
+                  >
+                    ⚙️ Buffer & Load Fixes
+                  </button>
+                  <button
+                    onClick={() => handleQuickQuestionClick(
+                      "আমি একটি নতুন ড্রামা/এনিমে রিকোয়েস্ট করতে চাই! (Submit anime request!)",
+                      "নতুন এনিমে, মুভি বা ড্রামা রিকোয়েস্ট সফলভাবে নথিভুক্ত করা হয়েছে! আমাদের টিম শীঘ্রই উপযুক্ত মিরর লিংক সহ কনটেন্টটি ডিরেক্টরিতে যুক্ত করবে। চোখ রাখুন Popcorn Play-তে!"
+                    )}
+                    className="shrink-0 bg-blue-600/10 hover:bg-blue-655/20 text-blue-400 border border-blue-500/15 px-3 py-1.5 rounded-xl text-[10px] font-sans font-bold transition-all cursor-pointer"
+                  >
+                    🎬 Demand Show Request
+                  </button>
+                </div>
               </div>
 
               {/* Messaging input block */}
