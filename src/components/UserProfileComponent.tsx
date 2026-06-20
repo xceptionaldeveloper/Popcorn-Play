@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   User, Sparkles, Heart, Clock, Trash2, 
@@ -33,6 +33,16 @@ export const UserProfileComponent: React.FC<UserProfileComponentProps> = ({
   triggerAlert
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<ProfileTab>('info');
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (!userProfile?.premiumUntil || !userProfile?.isPremium) return;
+    
+    const interval = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [userProfile?.premiumUntil, userProfile?.isPremium]);
 
   if (!userProfile) {
     return (
@@ -215,14 +225,36 @@ export const UserProfileComponent: React.FC<UserProfileComponentProps> = ({
                     </span>
                   </div>
                   
-                  {userProfile.premiumUntil && isUserPremium() && (
-                    <div className="space-y-0.5 text-right">
-                      <span className="text-[9px] text-gray-500 block font-mono text-right">VALIDS UNTIL</span>
-                      <span className="text-xs text-yellow-500 font-mono font-bold">
-                        {new Date(userProfile.premiumUntil).toLocaleDateString()}
-                      </span>
-                    </div>
-                  )}
+                  {userProfile.premiumUntil && isUserPremium() && (() => {
+                    const diff = userProfile.premiumUntil - now;
+                    if (diff <= 0) {
+                      return (
+                        <div className="space-y-0.5 text-right">
+                          <span className="text-[9px] text-[#f87171] bg-[#f87171]/10 px-2 py-0.5 rounded font-mono text-right uppercase tracking-wider font-extrabold animate-pulse">
+                            Expired (শেষ হয়েছে)
+                          </span>
+                        </div>
+                      );
+                    }
+                    const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+                    const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                    const s = Math.floor((diff % (1000 * 60)) / 1000);
+                    return (
+                      <div className="space-y-1 text-right bg-white/[0.02] border border-white/5 rounded-2xl px-3.5 py-2">
+                        <span className="text-[8px] text-gray-500 block font-mono text-right uppercase tracking-[0.1em]">Time Left (সময় বাকি)</span>
+                        <span className="text-xs text-yellow-400 font-mono font-extrabold flex items-center justify-end gap-1 select-none animate-pulse">
+                          <Clock className="w-3.5 h-3.5 text-yellow-500 shrink-0" />
+                          <span>
+                            {d > 0 ? `${d}d ` : ''}{String(h).padStart(2, '0')}h : {String(m).padStart(2, '0')}m : {String(s).padStart(2, '0')}s
+                          </span>
+                        </span>
+                        <span className="text-[9px] text-gray-500 block font-light text-right leading-none mt-0.5">
+                          Expires: {new Date(userProfile.premiumUntil).toLocaleDateString()}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 

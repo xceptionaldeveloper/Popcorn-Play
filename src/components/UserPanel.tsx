@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, Bell, Menu, Home, MessageSquare, User, Bookmark, 
@@ -133,6 +133,29 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     return null; // Empty profile means Auth required
   });
 
+  // Check locks
+  const isUserPremium = useCallback(() => {
+    if (!userProfile) return false;
+
+    // Explicit bypass if admin
+    const adminEmail = settings?.adminEmail?.trim().toLowerCase() || 'admin@popcornplay.com';
+    const cleanEmail = userProfile.email?.trim().toLowerCase();
+    if (cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === adminEmail) {
+      return true;
+    }
+
+    if (userProfile.isPremium) {
+      if (userProfile.premiumUntil && Date.now() > userProfile.premiumUntil) {
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }, [userProfile, settings?.adminEmail]);
+
+  // Live countdown timestamp
+  const [now, setNow] = useState(Date.now());
+
   // Auth Forms
   const [isSignUp, setIsSignUp] = useState(false);
   const [authEmail, setAuthEmail] = useState('');
@@ -164,9 +187,26 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   const [paymentMethod, setPaymentMethod] = useState<string>('bkash');
   const [paySenderNumber, setPaySenderNumber] = useState('');
   const [payTxnId, setPayTxnId] = useState('');
-  const [payAmount, setPayAmount] = useState('200'); // Standard upgrade BDT
+  const [payAmount, setPayAmount] = useState('150'); // Standard upgrade BDT
   const [payDuration, setPayDuration] = useState<number>(30); // Default to 30 days
   const [paymentSubmitted, setPaymentSubmitted] = useState(false);
+
+  // Keep payDuration in sync with selected/manually entered payAmount
+  useEffect(() => {
+    const plans = (settings?.premiumPlans && settings.premiumPlans.length > 0 ? settings.premiumPlans : [
+      { id: 'plan-1d', name: '1 Day (1D) VIP Premium', price: 10, durationDays: 1 },
+      { id: 'plan-3d', name: '3 Days (3D) VIP Premium', price: 25, durationDays: 3 },
+      { id: 'plan-7d', name: '7 Days (7D) VIP Premium', price: 50, durationDays: 7 },
+      { id: 'plan-15d', name: '15 Days (15D) VIP Premium', price: 90, durationDays: 15 },
+      { id: 'plan-30d', name: '30 Days (30D) VIP Premium', price: 150, durationDays: 30 },
+      { id: 'plan-60d', name: '60 Days (60D) VIP Premium', price: 280, durationDays: 60 },
+      { id: 'plan-365d', name: '365 Days (365D) VIP Premium', price: 1200, durationDays: 365 }
+    ]);
+    const matched = plans.find(p => String(p.price) === String(payAmount));
+    if (matched) {
+      setPayDuration(matched.durationDays);
+    }
+  }, [payAmount, settings?.premiumPlans]);
 
   // Parental Control Locks
   const [adultEnabled, setAdultEnabled] = useState(() => {
@@ -438,6 +478,14 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     }
   }, [content, viewingContent?.id]);
 
+  // Dedicated stable real-time clock ticking for visual countdowns
+  useEffect(() => {
+    const clockInterval = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => clearInterval(clockInterval);
+  }, []);
+
   // Real-time validation for active premium content playback & subscription auto-expiration checker
   useEffect(() => {
     const checkPremiumStatus = () => {
@@ -480,9 +528,9 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     }
 
     // Dynamic timer to automatically handle passive expirations in active tabs
-    const interval = setInterval(checkPremiumStatus, 5000);
+    const interval = setInterval(checkPremiumStatus, 2000);
     return () => clearInterval(interval);
-  }, [userProfile, viewingContent, settings]);
+  }, [userProfile, viewingContent, settings, isUserPremium]);
 
   // Synchronize React userProfile with Firebase Auth & Firestore, and handle auto-expiry
   useEffect(() => {
@@ -807,26 +855,6 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     }
   };
 
-  // Check locks
-  const isUserPremium = () => {
-    if (!userProfile) return false;
-
-    // Explicit bypass if admin
-    const adminEmail = settings?.adminEmail?.trim().toLowerCase() || 'admin@popcornplay.com';
-    const cleanEmail = userProfile.email?.trim().toLowerCase();
-    if (cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === adminEmail) {
-      return true;
-    }
-
-    if (userProfile.isPremium) {
-      if (userProfile.premiumUntil && Date.now() > userProfile.premiumUntil) {
-        return false;
-      }
-      return true;
-    }
-    return false;
-  };
-
   const isPremiumLocked = (item: ContentItem) => {
     if (!item.isPremium) return false;
     return !isUserPremium();
@@ -1118,15 +1146,41 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
 
           {/* User Logged in state info */}
           {userProfile ? (
-            <div className="flex items-center space-x-2">
-              <span className="text-[11px] font-mono text-gray-400 font-black hidden md:block">
-                {isUserPremium() ? '★ VIP PREMIUM' : 'FREE MEMBER'}
-              </span>
+            <div className="flex items-center space-x-3.5">
+              {isUserPremium() ? (
+                <div className="hidden sm:flex flex-col items-end justify-center text-right">
+                  <span className="text-[10px] font-black tracking-wide text-yellow-400 flex items-center gap-1 leading-none uppercase bg-yellow-500/10 border border-yellow-500/20 px-2 py-1 rounded-lg">
+                    <Sparkles className="w-2.5 h-2.5 text-yellow-500 animate-pulse fill-yellow-500" />
+                    <span>👑 VIP PASS ACTIVE</span>
+                  </span>
+                  {userProfile.premiumUntil && (() => {
+                    const diff = userProfile.premiumUntil - now;
+                    if (diff > 0) {
+                      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                      const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+                      
+                      return (
+                        <span className="text-[10px] font-mono text-emerald-400 font-bold leading-none mt-1.5 uppercase tracking-wider bg-emerald-500/5 px-1.5 py-0.5 rounded border border-emerald-500/10 hover:border-emerald-500/25 transition-all">
+                          {days > 0 ? `${days}d ` : ''}{String(hours).padStart(2, '0')}h {String(minutes).padStart(2, '0')}m {String(seconds).padStart(2, '0')}s
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              ) : (
+                <span className="text-[11px] font-mono text-gray-500 font-black hidden sm:block bg-white/5 border border-white/5 px-2.5 py-1 rounded-lg">
+                  FREE MEMBER
+                </span>
+              )}
               <button 
                 onClick={() => setActiveTab('profile')}
-                className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 hover:border-red-550 transition-all text-white flex items-center justify-center font-bold text-xs"
+                className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 hover:border-red-550 transition-all text-white flex items-center justify-center font-bold text-xs shadow-md select-none group"
+                title="Profile & VIP Info"
               >
-                {userProfile.name.charAt(0).toUpperCase()}
+                <span className="group-hover:scale-110 transition-transform">{userProfile.name.charAt(0).toUpperCase()}</span>
               </button>
             </div>
           ) : (
@@ -2663,10 +2717,14 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                   <div>
                     <label className="text-[10px] text-gray-500 font-mono block mb-2 font-bold uppercase tracking-wider">CHOOSE YOUR SUBSCRIPTION PLAN</label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3">
-                      {(settings?.premiumPlans || [
-                        { id: 'plan-1', name: '30 Days VIP Premium', price: 150, durationDays: 30 },
-                        { id: 'plan-2', name: '6 Months VIP Premium', price: 700, durationDays: 180 },
-                        { id: 'plan-3', name: '1 Year VIP Premium', price: 1200, durationDays: 365 }
+                      {(settings?.premiumPlans && settings.premiumPlans.length > 0 ? settings.premiumPlans : [
+                        { id: 'plan-1d', name: '1 Day (1D) VIP Premium', price: 10, durationDays: 1 },
+                        { id: 'plan-3d', name: '3 Days (3D) VIP Premium', price: 25, durationDays: 3 },
+                        { id: 'plan-7d', name: '7 Days (7D) VIP Premium', price: 50, durationDays: 7 },
+                        { id: 'plan-15d', name: '15 Days (15D) VIP Premium', price: 90, durationDays: 15 },
+                        { id: 'plan-30d', name: '30 Days (30D) VIP Premium', price: 150, durationDays: 30 },
+                        { id: 'plan-60d', name: '60 Days (60D) VIP Premium', price: 280, durationDays: 60 },
+                        { id: 'plan-365d', name: '365 Days (365D) VIP Premium', price: 1200, durationDays: 365 }
                       ]).map((plan) => {
                         const isSelected = String(payAmount) === String(plan.price);
                         return (
