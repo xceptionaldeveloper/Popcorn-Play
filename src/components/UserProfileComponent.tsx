@@ -250,7 +250,7 @@ export const UserProfileComponent: React.FC<UserProfileComponentProps> = ({
                           </span>
                         </span>
                         <span className="text-[9px] text-gray-500 block font-light text-right leading-none mt-0.5">
-                          Expires: {new Date(userProfile.premiumUntil).toLocaleDateString()}
+                          Expires: {new Date(userProfile.premiumUntil).toLocaleDateString('en-GB')} {new Date(userProfile.premiumUntil).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
                         </span>
                       </div>
                     );

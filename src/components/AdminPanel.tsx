@@ -6398,7 +6398,7 @@ export default function AdminPanel() {
 
                                     {usr.premiumUntil && !isUsrAdmin && (
                                       <span className="text-[9px] text-yellow-400 font-mono">
-                                        Expires: {new Date(usr.premiumUntil).toLocaleDateString()}
+                                        Expires: {new Date(usr.premiumUntil).toLocaleDateString('en-GB')} {new Date(usr.premiumUntil).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
                                       </span>
                                     )}
                                     
