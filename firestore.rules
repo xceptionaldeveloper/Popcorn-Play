@@ -18,10 +18,16 @@ service cloud.firestore {
 
     // Administrator Check: Bootstrapped securely using the verified user email
     function isAdmin() {
-      return isSignedIn() && 'email' in request.auth.token && (
-        request.auth.token.email == "mdikhlas098@gmail.com" ||
-        request.auth.token.email == "admin@popcornplay.com" ||
-        (exists(/databases/$(database)/documents/app_settings/config) && 
+      return isSignedIn() && (
+        ('email' in request.auth.token && (
+          request.auth.token.email == "mdikhlas098@gmail.com" ||
+          request.auth.token.email == "admin@popcornplay.com"
+        )) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('email', '') == "mdikhlas098@gmail.com" ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('email', '') == "admin@popcornplay.com"
+        )) ||
+        (exists(/databases/$(database)/documents/app_settings/config) && 'email' in request.auth.token &&
          request.auth.token.email == get(/databases/$(database)/documents/app_settings/config).data.get('adminEmail', ''))
       );
     }
@@ -35,7 +41,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
     }
 
     function incoming() {
@@ -143,7 +149,8 @@ service cloud.firestore {
     // Media Catalog items
     match /content/{contentId} {
       allow get, list: if true;
-      allow create, delete: if isAdmin() && isValidContentItem(incoming()) && isValidId(contentId);
+      allow create: if isAdmin() && isValidContentItem(incoming()) && isValidId(contentId);
+      allow delete: if isAdmin() && isValidId(contentId);
       allow update: if (isValidContentItem(incoming()) && isAdmin()) || (
                       incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'ratingCount', 'ratingSum']) &&
                       (!incoming().keys().hasAny(['rating']) || (incoming().rating is int || incoming().rating is float)) &&
@@ -178,7 +185,8 @@ service cloud.firestore {
     // Broadcaster notifications
     match /notifications/{notificationId} {
       allow get, list: if true;
-      allow write: if isAdmin() && isValidNotificationItem(incoming()) && isValidId(notificationId);
+      allow create, update: if isAdmin() && isValidNotificationItem(incoming()) && isValidId(notificationId);
+      allow delete: if isAdmin() && isValidId(notificationId);
     }
 
     // Noticeboard Notices
