@@ -157,6 +157,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
   // Noticeboard configuration
   const [noticesList, setNoticesList] = useState<NoticeItem[]>([]);
   const [showNoticeboardModal, setShowNoticeboardModal] = useState(false);
+  const [showSocialLinksModal, setShowSocialLinksModal] = useState(false);
 
   // Premium Payment billing invoice modal
   const [paymentContent, setPaymentContent] = useState<ContentItem | null>(null);
@@ -1281,9 +1282,11 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
               </div>
             </div>
 
-            {/* Noticeboard Section */}
-            <div className="border-t border-white/5 mt-6 pt-5">
-              <span className="text-[10px] text-gray-500 font-mono tracking-wider block mb-2.5 px-1 uppercase">NEWS & RELEASES</span>
+            {/* Noticeboard & Social Links Section */}
+            <div className="border-t border-white/5 mt-6 pt-5 space-y-3">
+              <span className="text-[10px] text-gray-500 font-mono tracking-wider block px-1 uppercase">UPDATES & COMMUNITY / নোটিশ ও সামাজিক লিংক</span>
+              
+              {/* Noticeboard Button */}
               <button
                 type="button"
                 onClick={() => {
@@ -1309,32 +1312,33 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                   </div>
                 )}
               </button>
-            </div>
 
-            {/* Drawer Social Handles */}
-            {settings?.socialLinks && settings.socialLinks.length > 0 && (
-              <div className="border-t border-white/5 mt-6 pt-5">
-                <span className="text-[10px] text-gray-500 font-mono tracking-wider block mb-2.5 px-1 uppercase">SUPPORT NETWORKS</span>
-                <div className="grid grid-cols-2 gap-2">
-                  {settings.socialLinks.map((link) => (
-                    <a
-                      key={link.id}
-                      href={link.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center space-x-1.5 p-2 bg-[#101012] hover:bg-red-500/5 group border border-white/5 hover:border-red-500/20 rounded-xl transition-all"
-                    >
-                      <div className="w-5 h-5 rounded bg-white/5 flex items-center justify-center text-gray-400 text-[8px] font-mono font-bold uppercase truncate max-w-[20px] leading-none group-hover:bg-red-500/10 group-hover:text-red-400">
-                        {link.icon || 'Link'}
-                      </div>
-                      <span className="text-[10.5px] font-bold text-gray-300 group-hover:text-white transition-colors truncate min-w-0">
-                        {link.platformName}
-                      </span>
-                    </a>
-                  ))}
+              {/* Social Links Board Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setDrawerOpen(false);
+                  setShowSocialLinksModal(true);
+                }}
+                className="w-full flex items-center justify-between p-3.5 bg-gradient-to-br from-red-950/20 to-red-900/10 hover:from-red-950/40 hover:to-red-900/20 border border-red-500/12 hover:border-red-500/35 rounded-xl transition-all text-left relative overflow-hidden group shadow-lg active:scale-[0.98] cursor-pointer"
+              >
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(239,68,68,0.1),transparent_50%)] pointer-events-none" />
+                <div className="flex items-center space-x-3 relative z-10">
+                  <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center text-red-500 group-hover:text-red-400 border border-red-500/15 group-hover:bg-red-500/25 transition-all">
+                    <Globe className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-black text-red-300 group-hover:text-white transition-colors duration-300 uppercase tracking-wide block">Social Links Board</span>
+                    <span className="text-[9px] text-red-400/95 font-mono tracking-wider uppercase block mt-0.5">অফিসিয়াল সোশ্যাল লিংক সমূহ</span>
+                  </div>
                 </div>
-              </div>
-            )}
+                {settings?.socialLinks && settings.socialLinks.length > 0 && (
+                  <div className="flex items-center relative z-10 bg-red-500/10 border border-red-500/25 px-2 py-0.5 rounded-full text-red-400 text-[9px] font-mono font-bold uppercase tracking-wider">
+                    {settings.socialLinks.length} Links
+                  </div>
+                )}
+              </button>
+            </div>
 
             <div className="text-[10px] font-mono text-gray-600 border-t border-white/5 pt-4 mt-6">
               <span>Popcorn Play Catalog Router v1.0</span>
@@ -3385,6 +3389,131 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                 className="w-full bg-gradient-to-r from-red-650 to-[#ef4444] hover:from-red-600 hover:to-red-500 text-white font-mono font-extrabold text-xs py-3.5 rounded-xl uppercase tracking-wider transition-all duration-300 shadow-md active:scale-[0.98] cursor-pointer"
               >
                 Close Bulletin Board (বন্ধ করুন)
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* SOCIAL LINKS POP-UP MODAL */}
+      {showSocialLinksModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Backdrop blur */}
+          <div 
+            onClick={() => setShowSocialLinksModal(false)} 
+            className="fixed inset-0 bg-black/85 backdrop-blur-md transition-opacity duration-300 animate-fade-in"
+          ></div>
+          
+          {/* Main Card Container */}
+          <div className="relative w-full max-w-lg bg-gradient-to-b from-[#0e0e11] via-[#09090b] to-[#040406] border border-blue-500/25 rounded-3xl p-6 md:p-8 text-left animate-scale-up shadow-[0_0_60px_rgba(59,130,246,0.15)] max-h-[85vh] flex flex-col justify-start overflow-hidden font-sans">
+            
+            {/* Pulsing neon top accent */}
+            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-600 animate-pulse rounded-t-3xl" />
+
+            {/* Header */}
+            <div className="flex justify-between items-center pb-4 border-b border-white/5 shrink-0">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg">
+                  <Globe className="w-5 h-5 text-white animate-spin" style={{ animationDuration: '6s' }} />
+                </div>
+                <div>
+                  <h3 className="font-display font-black text-lg text-white tracking-wide">Social Links / সোশ্যাল পেইজ ও গ্রুপ</h3>
+                  <p className="text-gray-400 text-[10.5px] font-mono mt-0.5 uppercase tracking-wider">OFFICIAL COMMUNITY CHANNELS</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowSocialLinksModal(false)} 
+                className="p-1.5 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full transition-all cursor-pointer"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* List Content */}
+            <div className="flex-1 overflow-y-auto mt-4 pr-1 space-y-4 no-scrollbar">
+              {!settings?.socialLinks || settings.socialLinks.length === 0 ? (
+                <div className="text-center py-12 bg-black/20 border border-white/5 rounded-2xl">
+                  <Globe className="w-8 h-8 text-gray-600 mx-auto mb-2 opacity-60" />
+                  <p className="text-xs text-gray-400 font-mono">লিঙ্ক পাওয়া যায়নি।</p>
+                </div>
+              ) : (
+                settings.socialLinks.map((link) => {
+                  const nameLower = link.platformName?.toLowerCase() || '';
+                  const isFb = nameLower.includes('facebook') || nameLower.includes('fb');
+                  const isYt = nameLower.includes('youtube') || nameLower.includes('yt');
+                  const isTg = nameLower.includes('telegram') || nameLower.includes('tg');
+                  const isMs = nameLower.includes('messenger');
+                  
+                  const accentColor = isFb ? 'from-blue-600 to-blue-400' 
+                                    : isYt ? 'from-red-600 to-red-400'
+                                    : isTg ? 'from-sky-500 to-sky-350'
+                                    : isMs ? 'from-purple-600 to-pink-500'
+                                    : 'from-blue-500 to-teal-400';
+                                    
+                  const borderHover = isFb ? 'hover:border-blue-500/40 hover:shadow-blue-950/10'
+                                    : isYt ? 'hover:border-red-500/40 hover:shadow-red-950/10'
+                                    : isTg ? 'hover:border-sky-500/40 hover:shadow-sky-950/10'
+                                    : 'hover:border-indigo-500/40 hover:shadow-indigo-950/10';
+
+                  return (
+                    <div 
+                      key={link.id} 
+                      className={`p-4 rounded-2xl border bg-white/[0.01] border-white/5 hover:bg-white/[0.03] transition-all duration-300 relative overflow-hidden group flex items-center justify-between gap-4 ${borderHover}`}
+                    >
+                      <div className="flex items-center space-x-3.5 min-w-0 font-sans">
+                        <div className={`w-11 h-11 rounded-xl bg-gradient-to-tr ${accentColor} p-[1px] shadow-md shrink-0`}>
+                          <div className="w-full h-full rounded-xl bg-[#09090b] flex items-center justify-center font-mono font-bold text-xs text-white group-hover:scale-105 transition-all">
+                            {link.icon || link.platformName?.substring(0, 2).toUpperCase() || 'LN'}
+                          </div>
+                        </div>
+
+                        <div className="text-left min-w-0">
+                          <h4 className="font-extrabold text-white text-sm tracking-wide leading-tight truncate">
+                            {link.platformName}
+                          </h4>
+                          <p className="text-[11px] text-gray-400 font-sans mt-1 leading-snug line-clamp-1">
+                            {link.linkName || 'আমাদের অফিশিয়াল লিঙ্ক'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2 shrink-0">
+                        <button
+                          onClick={() => {
+                            if (link.url) {
+                              navigator.clipboard.writeText(link.url);
+                            }
+                          }}
+                          className="p-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-lg transition-all cursor-pointer border border-white/5"
+                          title="Copy Link (লিংক কপি করুন)"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
+                        <a 
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-white font-mono font-bold text-[11px] bg-gradient-to-r ${accentColor} shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer`}
+                        >
+                          <span>Visit</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="pt-4 border-t border-white/5 shrink-0 text-center">
+              <button
+                onClick={() => setShowSocialLinksModal(false)}
+                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-mono font-extrabold text-xs py-3.5 rounded-xl uppercase tracking-wider transition-all duration-300 shadow-md active:scale-[0.98] cursor-pointer"
+              >
+                Close (বন্ধ করুন)
               </button>
             </div>
 
