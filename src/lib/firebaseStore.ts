@@ -426,10 +426,12 @@ export async function customSignUp(profile: Partial<UserProfile> & {password: st
       return newProfile;
     } catch (error: any) {
       console.error("Firebase Auth custom signup failed:", error);
-      if (error.code === 'auth/unauthorized-domain' || error.message?.includes('unauthorized-domain') || error.code === 'auth/network-request-failed' || error.message?.includes('network-request-failed')) {
+      const errMsg = (error.message || "").toLowerCase();
+      const errCode = (error.code || "").toLowerCase();
+      if (errCode === 'auth/unauthorized-domain' || errMsg.includes('unauthorized-domain') || errCode === 'auth/network-request-failed' || errMsg.includes('network-request-failed')) {
         throw new Error(`unauthorized-domain: Firebase has blocked real Signup because the current domain (${typeof window !== 'undefined' ? window.location.hostname : 'your-domain'}) is not added to your Firebase project's Authorized Domains list.`);
       }
-      if (error.code === 'auth/email-already-in-use') {
+      if (errCode === 'auth/email-already-in-use' || errMsg.includes('email-already-in-use')) {
         throw new Error('An account with this email already exists inside our registry. Please select Login instead! (এই ইমেইল দিয়ে ইতঃপূর্বেই অ্যাকাউন্ট তৈরি করা হয়েছে, দয়া করে লগইন করুন!)');
       }
       throw new Error(error.message || 'Firebase Authentication registration failed.');
@@ -488,10 +490,16 @@ export async function customSignIn(email: string, passwordInput: string): Promis
       }
     } catch (error: any) {
       console.error("Firebase Auth custom signin failed:", error);
-      if (error.code === 'auth/unauthorized-domain' || error.message?.includes('unauthorized-domain') || error.code === 'auth/network-request-failed' || error.message?.includes('network-request-failed')) {
+      const errMsg = (error.message || "").toLowerCase();
+      const errCode = (error.code || "").toLowerCase();
+      if (errCode === 'auth/unauthorized-domain' || errMsg.includes('unauthorized-domain') || errCode === 'auth/network-request-failed' || errMsg.includes('network-request-failed')) {
         throw new Error(`unauthorized-domain: Firebase has blocked real Sign-in because the current domain (${typeof window !== 'undefined' ? window.location.hostname : 'your-domain'}) is not added to your Firebase project's Authorized Domains list.`);
       }
-      if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found') {
+      if (
+        errCode === 'auth/wrong-password' || errMsg.includes('wrong-password') ||
+        errCode === 'auth/invalid-credential' || errMsg.includes('invalid-credential') ||
+        errCode === 'auth/user-not-found' || errMsg.includes('user-not-found')
+      ) {
         throw new Error('Incorrect email or password! Please try again. (ইমেইল অথবা পাসওয়ার্ড সফলভাবে মেলেনি!)');
       }
       throw new Error(error.message || 'Firebase Authentication login failed.');
