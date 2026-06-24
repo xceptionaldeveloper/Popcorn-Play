@@ -107,6 +107,22 @@
         "unreadCount": { "type": "number" }
       },
       "required": ["userId", "userName", "userEmail", "messages", "lastUpdated"]
+    },
+    "FeedbackItem": {
+      "title": "FeedbackItem",
+      "description": "User suggestions and bug reports sent to the administration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userName": { "type": "string" },
+        "type": { "type": "string" },
+        "message": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "userId", "userEmail", "userName", "type", "message", "timestamp", "status"]
     }
   },
   "firestore": {
@@ -137,6 +153,10 @@
     "/live_support/{userId}": {
       "schema": "SupportSession",
       "description": "Direct communication help-desk sessions."
+    },
+    "/feedback/{feedbackId}": {
+      "schema": "FeedbackItem",
+      "description": "Submitted user suggestions and bug reports."
     }
   }
 }

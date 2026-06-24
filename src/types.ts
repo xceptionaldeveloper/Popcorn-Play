@@ -108,6 +108,17 @@ export interface PaymentRequest {
   durationDays?: number;
 }
 
+export interface FeedbackItem {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  type: 'suggestion' | 'bug' | 'other';
+  message: string;
+  timestamp: string;
+  status: 'pending' | 'reviewed' | 'resolved';
+}
+
 export interface PaymentMethod {
   id: string;
   name: string;
@@ -120,6 +131,14 @@ export interface PremiumPlan {
   name: string; // e.g., '30 Days Premium', '6 Months VIP Premium'
   price: number; // e.g., 200, 1000
   durationDays: number; // e.g., 30, 180
+}
+
+export interface AvatarPreset {
+  id: string;
+  name: string;
+  url: string;
+  premium: boolean;
+  isCustom?: boolean;
 }
 
 export interface AppSettings {
@@ -160,6 +179,8 @@ export interface AppSettings {
   // Social links configs
   socialLinks?: SocialLink[];
   bannerAnimationType?: string;
+  avatars?: AvatarPreset[];
+  vipTiers?: string[];
 }
 
 export interface SocialLink {
@@ -212,6 +233,10 @@ export interface UserProfile {
   password?: string;
   watchHistory?: WatchHistoryEntry[];
   parentalEnabled?: boolean;
+  avatarUrl?: string;
+  vipTier?: string;
+  customStatus?: string;
+  joinedAt?: number;
 }
 
 export const SLIDER_ANIMATIONS: Record<string, {

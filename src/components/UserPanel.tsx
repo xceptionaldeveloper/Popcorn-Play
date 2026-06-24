@@ -13,7 +13,7 @@ import {
 } from '../types';
 import { UserProfileComponent } from './UserProfileComponent';
 import { 
-  subscribeContent, subscribeAppSettings, subscribeNotifications, subscribeContentFiltered,
+  subscribeContent, subscribeAppSettings, updateAppSettings, subscribeNotifications, subscribeContentFiltered,
   subscribeUserChat, sendMessage, submitPaymentRequest, clearChatSession, deleteChatSession, signInWithGoogle, customSignUp,
   customSignIn, subscribeUserProfile, updateUserProfile, submitUserRating, subscribeUserRating, subscribeAuth, logOut,
   subscribeNotices
@@ -123,7 +123,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
       if (cached) {
         const parsed = JSON.parse(cached);
         const cleanEmail = parsed?.email?.trim().toLowerCase();
-        const isAdmin = cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === 'admin@popcornplay.com';
+        const isAdmin = cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === 'admin@popcornplay.com' || cleanEmail === 'mypassion9182@gmail.com';
         if (isAdmin && localStorage.getItem('pp_user_logged_in') !== 'true') {
           return null;
         }
@@ -140,7 +140,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
     // Explicit bypass if admin
     const adminEmail = settings?.adminEmail?.trim().toLowerCase() || 'admin@popcornplay.com';
     const cleanEmail = userProfile.email?.trim().toLowerCase();
-    if (cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === adminEmail) {
+    if (cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === 'mypassion9182@gmail.com' || cleanEmail === adminEmail) {
       return true;
     }
 
@@ -501,7 +501,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
         // Exclude admins from expiration checks
         const adminEmail = settings?.adminEmail?.trim().toLowerCase() || 'admin@popcornplay.com';
         const cleanEmail = userProfile.email?.trim().toLowerCase();
-        if (cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === adminEmail) {
+        if (cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === 'mypassion9182@gmail.com' || cleanEmail === adminEmail) {
           return;
         }
 
@@ -556,7 +556,7 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
         // Intercept any administrative/development accounts to prevent automated login if they didn't log in explicitly as standard viewer/user
         const adminEmail = settings?.adminEmail?.trim().toLowerCase() || 'admin@popcornplay.com';
         const cleanEmail = fbUser.email?.trim().toLowerCase();
-        const isAdminUser = cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === adminEmail;
+        const isAdminUser = cleanEmail === 'mdikhlas098@gmail.com' || cleanEmail === 'mypassion9182@gmail.com' || cleanEmail === adminEmail;
         
         const isGoogleLoggingIn = localStorage.getItem('pp_google_logging_in') === 'true';
 
@@ -742,10 +742,18 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
       if (err.message && err.message.includes('unauthorized-domain')) {
         setUnauthorizedDomainDetected(window.location.hostname);
       }
-      if (err.code === 'auth/popup-closed-by-user' || err.message?.includes('popup-closed-by-user') || err.message?.includes('auth/popup-closed-by-user')) {
+      const isPopupBlocked = err.code === 'auth/popup-blocked' || err.message?.includes('popup-blocked') || err.message?.includes('auth/popup-blocked');
+      const isPopupClosed = err.code === 'auth/popup-closed-by-user' || err.message?.includes('popup-closed-by-user') || err.message?.includes('auth/popup-closed-by-user');
+      
+      if (isPopupBlocked || isPopupClosed) {
         setPopupClosedErrorDetected(true);
-        triggerAlert("⚠️ গুগল সাইন-ইন উইন্ডো বন্ধ করা হয়েছে। পাসওয়ার্ড দিয়ে সাইন-ইন করুন বা গেস্ট মোডে প্রবেশ করুন।");
-        setAuthError("গুগল সাইন-ইন উইন্ডো বন্ধ করা হয়েছে (পপ-আপ ব্লক হতে পারে)। পাসওয়ার্ড দিয়ে সরাসরি সাইন-ইন বা রেজিস্টার করুন বা গেস্ট মোড ব্যবহার করুন।");
+        if (isPopupBlocked) {
+          triggerAlert("⚠️ গুগল সাইন-ইন পপ-আপ ব্লক করা হয়েছে! নিউ উইন্ডোতে ওপেন করুন বা পাসওয়ার্ড দিয়ে সাইন-ইন করুন।");
+          setAuthError("গুগল সাইন-ইন পপ-আপ ব্লক করা হয়েছে। দয়া করে পপ-আপ এলাউ করুন, প্রজেক্টটি 'Open in New Tab' দিয়ে খুলুন অথবা পাসওয়ার্ড বা গেস্ট মোড দিয়ে সাইন-ইন করুন।");
+        } else {
+          triggerAlert("⚠️ গুগল সাইন-ইন উইন্ডো বন্ধ করা হয়েছে। পাসওয়ার্ড দিয়ে সাইন-ইন করুন বা গেস্ট মোডে প্রবেশ করুন।");
+          setAuthError("গুগল সাইন-ইন উইন্ডো বন্ধ করা হয়েছে (পপ-আপ ব্লক হতে পারে)। পাসওয়ার্ড দিয়ে সরাসরি সাইন-ইন বা রেজিস্টার করুন বা গেস্ট মোড ব্যবহার করুন।");
+        }
       } else {
         setAuthError(err.message || 'Google Auth failed');
       }
@@ -1991,63 +1999,108 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
 
                 {/* Pack Zip download support link */}
                 {viewingContent.zipUrl && (
-                  <div className="mt-5 p-3.5 bg-yellow-500/5 border border-yellow-500/15 rounded-2xl flex justify-between items-center gap-4">
-                    <div className="truncate">
-                      <span className="text-xs font-bold text-white block">Download Full Series Archive</span>
-                      <span className="text-[10px] text-yellow-500 block font-mono truncate">Get all episodes in high speed ZIP files pack</span>
+                  <div className="mt-5 p-5 bg-gradient-to-br from-amber-500/15 via-yellow-500/5 to-transparent border border-yellow-500/30 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-lg shadow-yellow-500/5 hover:border-yellow-500/50 transition-all duration-300">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4.5 h-4.5 text-yellow-400 animate-pulse shrink-0" />
+                        <span className="text-sm font-bold text-white tracking-wide">Download Full Series Archive (একসাথে সব পর্ব)</span>
+                      </div>
+                      <p className="text-xs text-gray-400 leading-relaxed">
+                        একটি মাত্র ক্লিকে হাই-স্পিড সার্ভার থেকে পুরো সিরিজের সব পর্ব উচ্চমানের ZIP ফাইল প্যাক হিসেবে ডাউনলোড করে নিন।
+                      </p>
                     </div>
                     <a 
                       href={viewingContent.zipUrl} 
                       target="_blank" 
                       rel="noreferrer"
-                      className="bg-yellow-500 hover:bg-yellow-400 text-black px-4 py-2 rounded-xl text-xs font-mono font-extrabold flex items-center space-x-1 shrink-0 cursor-pointer transition-all hover:scale-105"
+                      className="w-full sm:w-auto bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-black px-6 py-3 rounded-xl text-xs font-sans font-black flex items-center justify-center space-x-2 shrink-0 cursor-pointer transition-all duration-300 transform active:scale-95 shadow-md shadow-yellow-500/20 hover:shadow-yellow-500/40"
                     >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>ZIP PACK</span>
+                      <Download className="w-4 h-4 animate-bounce" />
+                      <span>ZIP PACK DOWNLOAD</span>
                     </a>
                   </div>
                 )}
               </div>
 
               {/* DYNAMIC DOWNLOAD AREA AND MULTI RESOLUTION INDEXES */}
-              <div className="glass p-6 rounded-3xl border-white/5 space-y-4">
+              <div className="glass p-6 rounded-3xl border-white/5 space-y-5">
                 
                 {/* 1. If category is Movies */}
                 {viewingContent.category === 'Movies' && (
-                  <div className="space-y-3">
-                    <span className="text-xs font-mono font-bold text-gray-400 block pb-1 border-b border-white/5 uppercase">
-                      📥 CHANNELS DOWNLOAD CHOICES
-                    </span>
-                    <div className="flex flex-wrap gap-2">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                      <span className="text-xs font-sans font-bold text-gray-300 flex items-center gap-1.5 uppercase tracking-wider">
+                        <Download className="w-4 h-4 text-red-500 shrink-0" />
+                        📥 Premium Download Servers (ডাউনলোড সার্ভার)
+                      </span>
+                      <span className="text-[10px] bg-green-500/10 text-green-400 px-2 py-0.5 rounded-full font-sans font-semibold animate-pulse shrink-0">
+                        ● Direct & High Speed CDN
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                       {/* Standard direct link fallback */}
                       {viewingContent.downloadUrl && (
                         <a
                           href={viewingContent.downloadUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5 px-4 py-2 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 transition-all cursor-pointer"
+                          className="relative overflow-hidden group bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 hover:from-red-600/10 hover:to-amber-600/10 text-gray-200 border border-white/10 p-3.5 rounded-2xl text-xs transition-all duration-300 flex flex-col justify-between h-[85px] cursor-pointer shadow-md hover:border-red-500/30 hover:-translate-y-0.5"
                         >
-                          <Download className="w-3.5 h-3.5 text-red-500" />
-                          <span>Direct Mirror</span>
+                          <div className="flex justify-between items-start">
+                            <span className="font-sans font-bold text-gray-100 group-hover:text-red-400 transition-colors">Direct Server</span>
+                            <Download className="w-4 h-4 text-gray-500 group-hover:text-red-500 group-hover:translate-y-0.5 transition-all duration-300" />
+                          </div>
+                          <div className="flex justify-between items-end">
+                            <span className="text-[10px] text-gray-400 font-mono">Standard CDN</span>
+                            <span className="text-[10px] text-red-400 bg-red-400/10 px-2 py-0.5 rounded font-mono font-bold group-hover:bg-red-500 group-hover:text-white transition-all">MIRROR</span>
+                          </div>
                         </a>
                       )}
 
                       {viewingContent.downloadLinks && viewingContent.downloadLinks.length > 0 ? (
-                        viewingContent.downloadLinks.map((link, idx) => (
-                          <a
-                            key={idx}
-                            href={link.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="bg-red-650 hover:bg-red-600 border border-white/5 px-4 py-2.5 rounded-xl text-xs font-mono font-black flex items-center space-x-1.5 transition-all cursor-pointer shadow hover:scale-105"
-                          >
-                            <Download className="w-3.5 h-3.5 text-white/90" />
-                            <span className="uppercase">{link.quality}</span>
-                          </a>
-                        ))
+                        viewingContent.downloadLinks.map((link, idx) => {
+                          const qual = (link.quality || '').toUpperCase();
+                          let qualityBg = 'from-emerald-600 to-teal-700';
+                          let qualityText = 'HD Quality';
+                          if (qual.includes('1080') || qual.includes('FHD')) {
+                            qualityBg = 'from-blue-600 to-indigo-700';
+                            qualityText = 'Full HD';
+                          } else if (qual.includes('2160') || qual.includes('4K') || qual.includes('UHD')) {
+                            qualityBg = 'from-purple-600 to-pink-700';
+                            qualityText = 'Ultra HD 4K';
+                          } else if (qual.includes('720') || qual.includes('HD')) {
+                            qualityBg = 'from-teal-600 to-emerald-700';
+                            qualityText = 'HD Quality';
+                          } else if (qual.includes('480') || qual.includes('SD')) {
+                            qualityBg = 'from-amber-600 to-orange-700';
+                            qualityText = 'SD Quality';
+                          }
+
+                          return (
+                            <a
+                              key={idx}
+                              href={link.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="relative overflow-hidden group bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 hover:from-white/5 hover:to-white/10 text-gray-200 border border-white/10 p-3.5 rounded-2xl text-xs transition-all duration-300 flex flex-col justify-between h-[85px] cursor-pointer shadow-md hover:border-red-500/30 hover:-translate-y-0.5"
+                            >
+                              <div className="flex justify-between items-start">
+                                <span className="font-sans font-extrabold text-white group-hover:text-red-400 transition-colors uppercase tracking-wider">{link.quality}</span>
+                                <Download className="w-4 h-4 text-gray-400 group-hover:text-red-400 group-hover:translate-y-0.5 transition-all duration-300" />
+                              </div>
+                              <div className="flex justify-between items-end">
+                                <span className="text-[10px] text-gray-400 font-mono">{qualityText}</span>
+                                <span className={`text-[10px] text-white bg-gradient-to-r ${qualityBg} px-2 py-0.5 rounded font-bold uppercase`}>DOWNLOAD</span>
+                              </div>
+                            </a>
+                          );
+                        })
                       ) : (
                         !viewingContent.downloadUrl && (
-                          <span className="text-[10px] text-gray-500 font-mono">No physical download mirrors currently indexed for this cinematic.</span>
+                          <div className="col-span-full py-4 text-center border border-dashed border-white/10 rounded-2xl bg-black/10">
+                            <span className="text-xs text-gray-400 font-sans">No physical download mirrors currently indexed for this cinematic.</span>
+                          </div>
                         )
                       )}
                     </div>
@@ -2063,45 +2116,75 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                       <div className="space-y-4">
                         {/* Active Episode mirror links block */}
                         {activeEp ? (
-                          <div className="bg-red-650/[0.03] border border-red-500/10 rounded-2xl p-4 space-y-3">
-                            <div className="flex justify-between items-center border-b border-white/5 pb-2">
-                              <div className="truncate">
-                                <span className="text-xs font-black text-white block">
-                                  📥 Episode {activeEp.number} Mirror Options
-                                </span>
-                                <span className="text-[10px] text-gray-400 block truncate font-mono max-w-[200px]">
-                                  {activeEp.title}
+                          <div className="bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 border border-white/10 rounded-2xl p-4.5 space-y-4 shadow-xl">
+                            <div className="flex justify-between items-center border-b border-white/10 pb-2.5">
+                              <div>
+                                <div className="flex items-center gap-1.5">
+                                  <Download className="w-4 h-4 text-red-500 shrink-0" />
+                                  <span className="text-xs font-black text-white uppercase tracking-wider">
+                                    Episode {activeEp.number} Mirror Options
+                                  </span>
+                                </div>
+                                <span className="text-[11px] text-gray-400 block truncate font-sans max-w-[250px] mt-0.5">
+                                  {activeEp.title || `Episode ${activeEp.number}`} (ডাউনলোড লিংকসমূহ)
                                 </span>
                               </div>
-                              <span className="bg-amber-500/10 text-amber-500 rounded px-2 py-0.5 text-[8px] font-mono font-bold uppercase tracking-wider shrink-0 block">
+                              <span className="bg-red-500/10 text-red-400 border border-red-500/25 rounded px-2.5 py-0.5 text-[9px] font-mono font-bold uppercase tracking-wider shrink-0 block">
                                 Multiple Quality
                               </span>
                             </div>
 
-                            <div className="flex flex-wrap gap-2 pt-1">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                               {activeEp.downloadLinks && activeEp.downloadLinks.length > 0 ? (
-                                activeEp.downloadLinks.map((link, idx) => (
-                                  <a
-                                    key={idx}
-                                    href={link.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="bg-white/5 hover:bg-white/10 text-gray-200 border border-white/5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center space-x-1.5 transition-all cursor-pointer"
-                                  >
-                                    <Download className="w-3 h-3 text-red-500" />
-                                    <span className="uppercase font-sans font-bold">{link.quality}</span>
-                                  </a>
-                                ))
+                                activeEp.downloadLinks.map((link, idx) => {
+                                  const qual = (link.quality || '').toUpperCase();
+                                  let qualityBg = 'from-emerald-600 to-teal-700';
+                                  let qualityText = 'HD Quality';
+                                  if (qual.includes('1080') || qual.includes('FHD')) {
+                                    qualityBg = 'from-blue-600 to-indigo-700';
+                                    qualityText = 'Full HD';
+                                  } else if (qual.includes('2160') || qual.includes('4K') || qual.includes('UHD')) {
+                                    qualityBg = 'from-purple-600 to-pink-700';
+                                    qualityText = 'Ultra HD 4K';
+                                  } else if (qual.includes('720') || qual.includes('HD')) {
+                                    qualityBg = 'from-teal-600 to-emerald-700';
+                                    qualityText = 'HD Quality';
+                                  } else if (qual.includes('480') || qual.includes('SD')) {
+                                    qualityBg = 'from-amber-600 to-orange-700';
+                                    qualityText = 'SD Quality';
+                                  }
+
+                                  return (
+                                    <a
+                                      key={idx}
+                                      href={link.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="relative overflow-hidden group bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 hover:from-white/5 hover:to-white/10 text-gray-200 border border-white/10 p-3.5 rounded-2xl text-xs transition-all duration-300 flex flex-col justify-between h-[85px] cursor-pointer shadow-md hover:border-red-500/30 hover:-translate-y-0.5"
+                                    >
+                                      <div className="flex justify-between items-start">
+                                        <span className="font-sans font-extrabold text-white group-hover:text-red-400 transition-colors uppercase tracking-wider">{link.quality}</span>
+                                        <Download className="w-4 h-4 text-gray-400 group-hover:text-red-400 group-hover:translate-y-0.5 transition-all duration-300" />
+                                      </div>
+                                      <div className="flex justify-between items-end">
+                                        <span className="text-[10px] text-gray-400 font-mono">{qualityText}</span>
+                                        <span className={`text-[10px] text-white bg-gradient-to-r ${qualityBg} px-2 py-0.5 rounded font-bold uppercase`}>DOWNLOAD</span>
+                                      </div>
+                                    </a>
+                                  );
+                                })
                               ) : (
-                                <span className="text-[10px] text-gray-500 font-mono font-sans pb-1">
-                                  Default streaming links are prepared. Download quality mirrors are syncing.
-                                </span>
+                                <div className="col-span-full py-4 text-center border border-dashed border-white/10 rounded-2xl bg-black/10">
+                                  <span className="text-[11px] text-gray-400 font-sans">
+                                    Default streaming links are prepared. Download quality mirrors are syncing.
+                                  </span>
+                                </div>
                               )}
                             </div>
                           </div>
                         ) : (
-                          <div className="bg-amber-500/[0.02] border border-amber-550/10 rounded-xl p-3.5 text-center">
-                            <span className="text-[10px] text-amber-550 font-mono block">
+                          <div className="bg-amber-500/[0.02] border border-amber-500/10 rounded-2xl p-4 text-center">
+                            <span className="text-xs text-amber-500 font-sans font-semibold block">
                               🍿 Select an episode inside catalog below to stream and retrieve multiple qualities download channels!
                             </span>
                           </div>
@@ -2404,6 +2487,8 @@ export default function UserPanel({ onSuggestAdminMode }: UserPanelProps) {
                   setPaymentContent(mockFilm);
                 }}
                 triggerAlert={triggerAlert}
+                settings={settings}
+                onUpdateSettings={updateAppSettings}
               />
               
               <div className="max-w-md mx-auto pt-4">

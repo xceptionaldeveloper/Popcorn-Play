@@ -67,7 +67,7 @@ export async function verifyUserSubscriptions(): Promise<{ expiredCount: number;
       } catch (e) {}
 
       const userEmail = currentUser?.email?.toLowerCase().trim();
-      const isAdmin = userEmail === 'mdikhlas098@gmail.com' || userEmail === adminEmail;
+      const isAdmin = userEmail === 'mdikhlas098@gmail.com' || userEmail === 'mypassion9182@gmail.com' || userEmail === adminEmail;
 
       if (isAdmin) {
         console.log("⏱️ subscriptionService: Admin identified. Checking subscription expiration dates in Firestore...");

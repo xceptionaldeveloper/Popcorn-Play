@@ -4,12 +4,12 @@ import {
   Plus, Trash2, Edit2, Check, X, ShieldAlert, Calendar, 
   TrendingUp, Users, Play, Download, ArrowUpRight, Search, Eye, AlertCircle, Ban, Globe,
   Lock, Fingerprint, Shield, Megaphone, Image, Bell,
-  Send, MessageCircle, Phone, Link as LinkIcon
+  Send, MessageCircle, Phone, Link as LinkIcon, RefreshCw, Trophy, Sliders
 } from 'lucide-react';
 import { 
   ContentItem, Episode, DownloadLink, AppSettings, PaymentRequest, 
   SupportSession, VisitorStat, ContentCategory, PremiumPlan, BannerItem, NotificationItem, PopupItem, UserProfile,
-  SLIDER_ANIMATIONS, NoticeItem
+  SLIDER_ANIMATIONS, NoticeItem, FeedbackItem
 } from '../types';
 import { 
   subscribeContent, saveContentItem, deleteContentItem, 
@@ -21,12 +21,13 @@ import {
   subscribeNotices, saveNoticeItem, deleteNoticeItem,
   IS_FIREBASE_REAL,
   subscribeAllUserProfiles, adminUpdateUserProfile, deleteUserProfile,
-  customSignIn, customSignUp, subscribeAuth
+  customSignIn, customSignUp, subscribeAuth,
+  subscribeFeedback, updateFeedbackStatus, deleteFeedback
 } from '../lib/firebaseStore';
 import { verifyUserSubscriptions } from '../lib/subscriptionService';
 
 export default function AdminPanel() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'movies' | 'series' | 'support' | 'financials' | 'settings' | 'categories' | 'popups' | 'banners' | 'notifications' | 'socials' | 'users' | 'noticeboard'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'movies' | 'series' | 'support' | 'financials' | 'settings' | 'categories' | 'popups' | 'banners' | 'notifications' | 'socials' | 'users' | 'noticeboard' | 'avatars' | 'feedback'>('dashboard');
   const [supportSubTab, setSupportSubTab] = useState<'chat' | 'management'>('chat');
   const [supportSearchQuery, setSupportSearchQuery] = useState('');
   const [supportFilterType, setSupportFilterType] = useState<'all' | 'active' | 'hidden'>('active');
@@ -43,6 +44,14 @@ export default function AdminPanel() {
   // Dynamic Payment Method Manager states
   const [editingPayMethodId, setEditingPayMethodId] = useState<string | null>(null);
   const [payMethodForm, setPayMethodForm] = useState({ name: '', number: '', instructions: '' });
+
+  // Avatar Preset CMS states
+  const [editingAvatarId, setEditingAvatarId] = useState<string | null>(null);
+  const [avatarForm, setAvatarForm] = useState({ name: '', url: '', premium: false });
+
+  // VIP Title CMS states
+  const [editingVipTitleIndex, setEditingVipTitleIndex] = useState<number | null>(null);
+  const [vipTitleFormText, setVipTitleFormText] = useState('');
   
   // Real-time synced states
   const [content, setContent] = useState<ContentItem[]>([]);
@@ -245,6 +254,12 @@ export default function AdminPanel() {
   const [newSocialIcon, setNewSocialIcon] = useState('Globe');
   const [editingSocialId, setEditingSocialId] = useState<string | null>(null);
 
+  // Feedback management states
+  const [feedbackList, setFeedbackList] = useState<FeedbackItem[]>([]);
+  const [feedbackTypeFilter, setFeedbackTypeFilter] = useState<'all' | 'suggestion' | 'bug' | 'other'>('all');
+  const [feedbackStatusFilter, setFeedbackStatusFilter] = useState<'all' | 'pending' | 'reviewed' | 'resolved'>('all');
+  const [feedbackSearchQuery, setFeedbackSearchQuery] = useState('');
+
   // User management states
   const [allUsersList, setAllUsersList] = useState<UserProfile[]>([]);
   const [userSearchQuery, setUserSearchQuery] = useState('');
@@ -273,6 +288,7 @@ export default function AdminPanel() {
     if (IS_FIREBASE_REAL && currentAuthUser) {
       const correctEmail = settings?.adminEmail?.trim() || 'admin@popcornplay.com';
       const isUserAdmin = currentAuthUser.email === 'mdikhlas098@gmail.com' || 
+                          currentAuthUser.email === 'mypassion9182@gmail.com' ||
                           currentAuthUser.email?.toLowerCase().trim() === correctEmail.toLowerCase().trim();
       
       if (!isUserAdmin) {
@@ -302,9 +318,29 @@ export default function AdminPanel() {
         try {
           const activeUser = currentAuthUser;
           const isAdminActive = activeUser?.email === 'mdikhlas098@gmail.com' || 
+                                activeUser?.email === 'mypassion9182@gmail.com' ||
                                 activeUser?.email?.toLowerCase().trim() === correctEmail.toLowerCase().trim();
           
           if (!isAdminActive) {
+            // Guard 1: Do NOT step on standard user session if they are logged in on the viewer page
+            const isUserPanelLogged = localStorage.getItem('pp_user_logged_in') === 'true';
+            if (isUserPanelLogged) {
+              console.log("[AdminPanel Sync] Standard user session is active. Skipping silent admin re-auth to prevent auth session war.");
+              return;
+            }
+
+            // Guard 2: Throttling / Rate-limiting silent re-authentication requests
+            const lastReauthTimeStr = sessionStorage.getItem('pp_last_silent_reauth_time');
+            const now = Date.now();
+            if (lastReauthTimeStr) {
+              const lastTime = parseInt(lastReauthTimeStr, 10);
+              if (now - lastTime < 300000) { // 5 minutes throttle
+                console.warn("[AdminPanel Sync] Silent admin re-auth throttled to prevent auth/too-many-requests lockouts.");
+                return;
+              }
+            }
+            
+            sessionStorage.setItem('pp_last_silent_reauth_time', String(now));
             console.log("[AdminPanel Sync] Silently re-authenticating administrative Firebase session...");
             await customSignIn(correctEmail.toLowerCase(), correctPassword);
           }
@@ -326,16 +362,23 @@ export default function AdminPanel() {
     let unsubPayments = () => {};
     let unsubChats = () => {};
     let unsubUsers = () => {};
+    let unsubFeedback = () => {};
     
-    const isAuthenticAdmin = !IS_FIREBASE_REAL || (currentAuthUser && (
-      currentAuthUser.email === 'mdikhlas098@gmail.com' || 
-      currentAuthUser.email?.toLowerCase().trim() === (settings?.adminEmail || 'admin@popcornplay.com').toLowerCase().trim()
-    ));
+    const isAuthenticAdmin = !IS_FIREBASE_REAL || (
+      currentAuthUser ? (
+        currentAuthUser.email === 'mdikhlas098@gmail.com' || 
+        currentAuthUser.email === 'mypassion9182@gmail.com' || 
+        currentAuthUser.email?.toLowerCase().trim() === (settings?.adminEmail || 'admin@popcornplay.com').toLowerCase().trim()
+      ) : (
+        localStorage.getItem('pp_admin_logged') === 'true'
+      )
+    );
 
     if (isAdminLoggedIn && isAuthenticAdmin) {
       unsubPayments = subscribePayments((pays) => setPayments(pays));
       unsubChats = subscribeAllChatsForAdmin((chats) => setChatSessions(chats));
       unsubUsers = subscribeAllUserProfiles((profiles) => setAllUsersList(profiles));
+      unsubFeedback = subscribeFeedback((feedback) => setFeedbackList(feedback));
       
       // Automatically verify and downgrade expired subscriptions in Firestore securely
       verifyUserSubscriptions()
@@ -361,6 +404,7 @@ export default function AdminPanel() {
       unsubNotifications();
       unsubNotices();
       unsubUsers();
+      unsubFeedback();
     };
   }, [isAdminLoggedIn, currentAuthUser, settings?.adminEmail]);
 
@@ -1042,7 +1086,7 @@ export default function AdminPanel() {
     try {
       const profile = await signInWithGoogle();
       const correctEmail = settings?.adminEmail?.trim() || 'admin@popcornplay.com';
-      if (profile.email === 'mdikhlas098@gmail.com' || profile.email === correctEmail || profile.isAdmin) {
+      if (profile.email === 'mdikhlas098@gmail.com' || profile.email === 'mypassion9182@gmail.com' || profile.email === correctEmail || profile.isAdmin) {
         setIsAdminLoggedIn(true);
         localStorage.setItem('pp_admin_logged', 'true');
         setLoginError(null);
@@ -1691,6 +1735,26 @@ export default function AdminPanel() {
               <Users className="w-4 h-4" />
               <span>User Management</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('avatars')}
+              className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
+                activeTab === 'avatars' ? 'bg-red-600/10 text-red-500 border-l-2 border-red-500' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <Image className="w-4 h-4" />
+              <span>Avatar Presets CMS</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('feedback')}
+              className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
+                activeTab === 'feedback' ? 'bg-red-600/10 text-red-500 border-l-2 border-red-500' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <MessageCircle className="w-4 h-4" />
+              <span>User Feedback</span>
+            </button>
           </nav>
         </div>
 
@@ -1728,6 +1792,8 @@ export default function AdminPanel() {
               {activeTab === 'socials' && 'Social Links Configuration'}
               {activeTab === 'noticeboard' && 'Notice Board CMS'}
               {activeTab === 'users' && 'User Accounts & Access Management'}
+              {activeTab === 'avatars' && 'Custom Avatars CMS Registry'}
+              {activeTab === 'feedback' && 'Suggestions & Bug Reports'}
             </h2>
             <p className="text-sm text-gray-400">
               {activeTab === 'dashboard' && 'Live streaming stats, database metrics, and incoming subscription requests.'}
@@ -1743,6 +1809,8 @@ export default function AdminPanel() {
               {activeTab === 'socials' && 'Configure official platforms, help links, and social channel handles displayed to users.'}
               {activeTab === 'noticeboard' && 'Create, edit, and style notifications or bulletins displayed to your platform viewers.'}
               {activeTab === 'users' && 'Search for registered viewer profiles, configure premium status variables, and edit or delete accounts.'}
+              {activeTab === 'avatars' && 'Add, edit, or delete custom avatar presets, premium choices, and manage links submitted by users.'}
+              {activeTab === 'feedback' && 'Review user suggestions, bug reports, and other feedback items submitted directly via Firebase.'}
             </p>
           </div>
 
@@ -2474,16 +2542,18 @@ export default function AdminPanel() {
               </h3>
 
               <div className="flex flex-wrap gap-1.5 mb-4 bg-black/40 border border-white/5 rounded-xl p-1.5">
-                {(settings?.mainCategories || ['Anime', 'Cartoon', 'Drama', 'Serial']).map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setSeriesCategory(cat)}
-                    className={`text-[10px] font-mono leading-none tracking-tight font-extrabold px-3.5 py-2.5 rounded-lg transition-all cursor-pointer ${seriesCategory === cat ? 'bg-red-650 text-white shadow-lg font-black' : 'text-gray-400 hover:text-white hover:bg-white/[0.03]'}`}
-                  >
-                    {cat}
-                  </button>
-                ))}
+                {(settings?.mainCategories || ['Anime', 'Cartoon', 'Drama', 'Serial'])
+                  .filter((cat) => cat.toLowerCase() !== 'movies' && cat.toLowerCase() !== 'movie')
+                  .map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setSeriesCategory(cat as any)}
+                      className={`text-[10px] font-mono leading-none tracking-tight font-extrabold px-3.5 py-2.5 rounded-lg transition-all cursor-pointer ${seriesCategory === cat ? 'bg-red-650 text-white shadow-lg font-black' : 'text-gray-400 hover:text-white hover:bg-white/[0.03]'}`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
               </div>
 
               <form onSubmit={handleSaveSeries} className="space-y-4">
@@ -6359,7 +6429,7 @@ export default function AdminPanel() {
                         Viewer Accounts Registry ({allUsersList.filter(user => {
                           const emailLower = (user.email || '').trim().toLowerCase();
                           const adminEmailConf = (settings?.adminEmail || 'admin@popcornplay.com').trim().toLowerCase();
-                          return emailLower !== adminEmailConf && emailLower !== 'admin@popcornplay.com' && emailLower !== 'mdikhlas098@gmail.com';
+                          return emailLower !== adminEmailConf && emailLower !== 'admin@popcornplay.com' && emailLower !== 'mdikhlas098@gmail.com' && emailLower !== 'mypassion9182@gmail.com';
                         }).length})
                       </h4>
 
@@ -6380,7 +6450,7 @@ export default function AdminPanel() {
                       {allUsersList.filter(user => {
                         const emailLower = (user.email || '').trim().toLowerCase();
                         const adminEmailConf = (settings?.adminEmail || 'admin@popcornplay.com').trim().toLowerCase();
-                        const isUsrAdmin = emailLower === adminEmailConf || emailLower === 'admin@popcornplay.com' || emailLower === 'mdikhlas098@gmail.com';
+                        const isUsrAdmin = emailLower === adminEmailConf || emailLower === 'admin@popcornplay.com' || emailLower === 'mdikhlas098@gmail.com' || emailLower === 'mypassion9182@gmail.com';
                         if (isUsrAdmin) return false;
                         const name = (user.name || '').toLowerCase();
                         const email = (user.email || '').toLowerCase();
@@ -6395,7 +6465,7 @@ export default function AdminPanel() {
                         allUsersList.filter(user => {
                           const emailLower = (user.email || '').trim().toLowerCase();
                           const adminEmailConf = (settings?.adminEmail || 'admin@popcornplay.com').trim().toLowerCase();
-                          const isUsrAdmin = emailLower === adminEmailConf || emailLower === 'admin@popcornplay.com' || emailLower === 'mdikhlas098@gmail.com';
+                          const isUsrAdmin = emailLower === adminEmailConf || emailLower === 'admin@popcornplay.com' || emailLower === 'mdikhlas098@gmail.com' || emailLower === 'mypassion9182@gmail.com';
                           if (isUsrAdmin) return false;
                           const name = (user.name || '').toLowerCase();
                           const email = (user.email || '').toLowerCase();
@@ -6405,7 +6475,7 @@ export default function AdminPanel() {
                           const isUsrAdmin = (() => {
                             const emailLower = (usr.email || '').trim().toLowerCase();
                             const adminEmailConf = (settings?.adminEmail || 'admin@popcornplay.com').trim().toLowerCase();
-                            return emailLower === adminEmailConf || emailLower === 'admin@popcornplay.com' || emailLower === 'mdikhlas098@gmail.com';
+                            return emailLower === adminEmailConf || emailLower === 'admin@popcornplay.com' || emailLower === 'mdikhlas098@gmail.com' || emailLower === 'mypassion9182@gmail.com';
                           })();
 
                           return (
@@ -6513,6 +6583,692 @@ export default function AdminPanel() {
             </div>
           </div>
         )}
+
+        {/* 13. AVATAR PRESETS CMS PANEL */}
+        {activeTab === 'avatars' && (() => {
+          const defaultList = [
+            { id: 'av-spidey', name: 'Spider-Man (Neon Glow)', url: 'https://images.unsplash.com/photo-1635805737707-575885ab0820?auto=format&fit=crop&w=150&q=80', premium: false },
+            { id: 'av-deadpool', name: 'Deadpool (Pop Art)', url: 'https://images.unsplash.com/photo-1620336655055-088d06e36bf0?auto=format&fit=crop&w=150&q=80', premium: false },
+            { id: 'av-ironman', name: 'Iron Man (Gold Tech)', url: 'https://images.unsplash.com/photo-1608889175123-8ec330b86f84?auto=format&fit=crop&w=150&q=80', premium: true },
+            { id: 'av-luffy', name: 'Gear 5 (Cyber Samurai)', url: 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?auto=format&fit=crop&w=150&q=80', premium: false },
+            { id: 'av-joker', name: 'The Joker (Cinematic)', url: 'https://images.unsplash.com/photo-1559583985-c80d8ad9b29f?auto=format&fit=crop&w=150&q=80', premium: true },
+            { id: 'av-anime-girl', name: 'Mage Princess', url: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?auto=format&fit=crop&w=150&q=80', premium: false },
+            { id: 'av-cyberninja', name: 'Cyber Ninja Gamer', url: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=150&q=80', premium: false },
+            { id: 'av-matrix-hero', name: 'Matrix Cyberpunk Rebel', url: 'https://images.unsplash.com/photo-1614064641938-3bbee52942c7?auto=format&fit=crop&w=150&q=80', premium: true },
+            { id: 'av-popcorn-mascot', name: 'Neon Popcorn Vibe', url: 'https://images.unsplash.com/photo-1578849278619-e73505e9610f?auto=format&fit=crop&w=150&q=80', premium: false },
+            { id: 'av-hollywood-star', name: 'VIP Golden sovereign', url: 'https://images.unsplash.com/photo-1513151233558-d860c5398176?auto=format&fit=crop&w=150&q=80', premium: true }
+          ];
+          const liveList = settings?.avatars && settings.avatars.length > 0 ? settings.avatars : defaultList;
+
+          const handleAddOrEditAvatar = async (e: React.FormEvent) => {
+            e.preventDefault();
+            if (!avatarForm.name.trim() || !avatarForm.url.trim()) {
+              triggerAlert("Please fill in all required fields!");
+              return;
+            }
+
+            let updatedList = [...liveList];
+            if (editingAvatarId) {
+              // Edit existing
+              updatedList = updatedList.map(av => 
+                av.id === editingAvatarId 
+                  ? { ...av, name: avatarForm.name, url: avatarForm.url, premium: avatarForm.premium }
+                  : av
+              );
+              triggerAlert("Avatar preset modified successfully!");
+            } else {
+              // Add new
+              const newPreset = {
+                id: 'av-' + Date.now(),
+                name: avatarForm.name,
+                url: avatarForm.url,
+                premium: avatarForm.premium,
+                isCustom: true
+              };
+              updatedList.push(newPreset);
+              triggerAlert("New avatar preset created successfully!");
+            }
+
+            const nextSettings = { ...settings!, avatars: updatedList };
+            setSettings(nextSettings);
+            await updateAppSettings(nextSettings);
+
+            // Reset Form
+            setEditingAvatarId(null);
+            setAvatarForm({ name: '', url: '', premium: false });
+          };
+
+          const handleDeleteAvatar = (id: string) => {
+            showConfirm(
+              "Delete Avatar Preset",
+              "Are you sure you want to delete this avatar preset from the platform?",
+              async () => {
+                const updatedList = liveList.filter(av => av.id !== id);
+                const nextSettings = { ...settings!, avatars: updatedList };
+                setSettings(nextSettings);
+                await updateAppSettings(nextSettings);
+                triggerAlert("Avatar preset deleted successfully.");
+              }
+            );
+          };
+
+          const handleRestoreDefaults = () => {
+            showConfirm(
+              "Restore Default Avatars",
+              "Are you sure you want to restore system default beautiful avatars? This will overwrite existing custom avatars.",
+              async () => {
+                const nextSettings = { ...settings!, avatars: defaultList };
+                setSettings(nextSettings);
+                await updateAppSettings(nextSettings);
+                triggerAlert("System default premium presets restored successfully.");
+              }
+            );
+          };
+
+          return (
+            <div id="admin-avatars-panel" className="space-y-8 animate-fade-in">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                
+                {/* Left Side: Creation / Edit form */}
+                <div className="lg:col-span-5 bg-[#0f0f12] border border-white/5 p-6 rounded-3xl space-y-6 h-fit">
+                  <div>
+                    <h3 className="text-md font-extrabold text-white flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-red-500 animate-pulse" />
+                      <span>{editingAvatarId ? 'Edit Avatar Specifications' : 'Deploy New Avatar Preset'}</span>
+                    </h3>
+                    <p className="text-[10px] text-gray-500 font-mono mt-1">
+                      Configure details for avatars shown inside streamer passports.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleAddOrEditAvatar} className="space-y-4">
+                    <div>
+                      <label className="text-[10px] text-gray-400 font-mono block mb-1">Avatar Display Name *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Neon Samurai"
+                        value={avatarForm.name}
+                        onChange={(e) => setAvatarForm({ ...avatarForm, name: e.target.value })}
+                        className="w-full bg-black/60 border border-white/10 focus:border-red-500 focus:outline-none rounded-xl px-4 py-3 text-xs text-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] text-gray-400 font-mono block mb-1">Avatar Image URL *</label>
+                      <input
+                        type="url"
+                        required
+                        placeholder="https://images.unsplash.com/photo-..."
+                        value={avatarForm.url}
+                        onChange={(e) => setAvatarForm({ ...avatarForm, url: e.target.value })}
+                        className="w-full bg-black/60 border border-white/10 focus:border-red-500 focus:outline-none rounded-xl px-4 py-3 text-xs text-white"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between p-3.5 bg-black/30 border border-white/5 rounded-xl">
+                      <div className="space-y-0.5">
+                        <span className="text-[10.5px] font-bold text-white block">VIP Premium Only?</span>
+                        <span className="text-[8.5px] text-gray-500 font-mono">Restricted to active subscription pass holders.</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={avatarForm.premium}
+                        onChange={(e) => setAvatarForm({ ...avatarForm, premium: e.target.checked })}
+                        className="w-4 h-4 accent-red-650 rounded cursor-pointer"
+                      />
+                    </div>
+
+                    {avatarForm.url && avatarForm.url.startsWith('http') && (
+                      <div className="space-y-1.5 p-3.5 bg-black/20 border border-white/5 rounded-xl flex flex-col items-center">
+                        <span className="text-[8.5px] text-gray-500 font-mono uppercase tracking-wider block">Thumbnail Live Preview</span>
+                        <div className="w-16 h-16 rounded-xl overflow-hidden border border-white/10 shadow-md">
+                          <img src={avatarForm.url} alt="Live Preview" className="w-full h-full object-cover" onError={(e) => { (e.target as any).src='https://placehold.co/150'; }} />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2.5 pt-2">
+                      {editingAvatarId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingAvatarId(null);
+                            setAvatarForm({ name: '', url: '', premium: false });
+                          }}
+                          className="bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border border-white/5 px-4 rounded-xl text-xs font-mono font-bold uppercase transition-all cursor-pointer flex-1 py-3 text-center"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      <button
+                        type="submit"
+                        className="bg-red-650 hover:bg-red-500 text-white font-mono font-bold text-xs py-3 rounded-xl uppercase tracking-wider shadow-lg shadow-red-650/10 transition-all flex items-center justify-center gap-1.5 flex-1 cursor-pointer"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>{editingAvatarId ? 'Apply Edit' : 'Add Preset'}</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* Right Side: Existing Presets Directory */}
+                <div className="lg:col-span-7 bg-[#0f0f12] border border-white/5 p-6 rounded-3xl space-y-6">
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                    <div>
+                      <h3 className="text-md font-extrabold text-white flex items-center gap-2">
+                        <Image className="w-4.5 h-4.5 text-gray-400" />
+                        <span>Active Presets Registry ({liveList.length})</span>
+                      </h3>
+                      <p className="text-[10px] text-gray-500 font-mono mt-1">
+                        Displaying both system default beautiful avatars and user submitted custom links.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleRestoreDefaults}
+                      className="bg-white/5 hover:bg-red-550/10 border border-white/10 hover:border-red-500/20 text-[9px] text-gray-300 hover:text-red-400 font-mono font-bold px-3 py-2.5 rounded-xl uppercase transition-all flex items-center justify-center gap-1.5 self-start cursor-pointer"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>Restore Defaults</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[580px] overflow-y-auto pr-1">
+                    {liveList.map((av) => (
+                      <div 
+                        key={av.id || av.name}
+                        className={`p-3.5 rounded-2xl bg-black/40 border transition-all flex gap-3 items-center hover:scale-[1.01] ${
+                          av.premium ? 'border-yellow-500/20 shadow-sm shadow-yellow-500/2' : 'border-white/5'
+                        }`}
+                      >
+                        {/* Avatar Pic */}
+                        <div className="w-14 h-14 rounded-xl overflow-hidden border border-white/10 shrink-0 relative">
+                          <img src={av.url} alt={av.name} className="w-full h-full object-cover" />
+                        </div>
+
+                        {/* Details */}
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <h4 className="text-xs font-black text-white truncate leading-tight">{av.name}</h4>
+                          <p className="text-[8px] font-mono text-gray-500 truncate" title={av.url}>{av.url}</p>
+                          <div className="flex gap-1.5">
+                            {av.premium ? (
+                              <span className="text-[8px] font-mono font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.2 rounded uppercase">
+                                VIP PREM
+                              </span>
+                            ) : (
+                              <span className="text-[8px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded uppercase">
+                                FREE
+                              </span>
+                            )}
+                            {av.isCustom ? (
+                              <span className="text-[8px] font-mono text-rose-400 bg-rose-500/10 px-1.5 py-0.2 rounded uppercase">
+                                USER SUBMITTED
+                              </span>
+                            ) : (
+                              <span className="text-[8px] font-mono text-blue-400 bg-blue-500/10 px-1.5 py-0.2 rounded uppercase">
+                                SYSTEM
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex flex-col gap-1.5 self-center shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingAvatarId(av.id);
+                              setAvatarForm({ name: av.name, url: av.url, premium: av.premium });
+                              // Scroll form into view if on mobile
+                              document.getElementById('admin-avatars-panel')?.scrollIntoView({ behavior: 'smooth' });
+                            }}
+                            className="p-2 text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition-all cursor-pointer"
+                            title="Edit preset"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteAvatar(av.id)}
+                            className="p-2 text-red-500 hover:text-red-400 bg-red-500/5 hover:bg-red-500/15 rounded-lg transition-all cursor-pointer"
+                            title="Delete preset"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* SECOND ROW: Elite VIP Titles CMS Section */}
+              <div className="border-t border-white/5 pt-8 mt-8 space-y-6">
+                <div>
+                  <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                    <Trophy className="w-5 h-5 text-yellow-500 animate-pulse" />
+                    <span>Elite VIP Titles CMS Registry</span>
+                  </h3>
+                  <p className="text-xs text-gray-400">
+                    Create, edit, or delete customizable metallic titles displayed next to elite subscription holders.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                  {/* Left Side form */}
+                  <div className="lg:col-span-5 bg-[#0f0f12] border border-white/5 p-6 rounded-3xl space-y-4 h-fit">
+                    <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                      <Sliders className="w-4 h-4 text-red-500" />
+                      <span>{editingVipTitleIndex !== null ? 'Modify Elite VIP Title' : 'Register New Elite VIP Title'}</span>
+                    </h4>
+                    
+                    <form 
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!vipTitleFormText.trim()) {
+                          triggerAlert("Please enter a valid title name!");
+                          return;
+                        }
+
+                        const defaultTitles = [
+                          '🍿 Popcorn Binger',
+                          '👑 Cinema Monarch',
+                          '⚡ Neon Overlord',
+                          '💎 Galactic Critic',
+                          '🌟 Showbiz Legend',
+                          '🔥 Screen Warrior'
+                        ];
+                        const currentTitles = settings?.vipTiers && settings.vipTiers.length > 0 ? [...settings.vipTiers] : [...defaultTitles];
+
+                        if (editingVipTitleIndex !== null) {
+                          // edit
+                          currentTitles[editingVipTitleIndex] = vipTitleFormText.trim();
+                          triggerAlert("Elite VIP Title successfully updated!");
+                        } else {
+                          // add
+                          currentTitles.push(vipTitleFormText.trim());
+                          triggerAlert("New Elite VIP Title successfully registered!");
+                        }
+
+                        const nextSettings = { ...settings!, vipTiers: currentTitles };
+                        setSettings(nextSettings);
+                        await updateAppSettings(nextSettings);
+
+                        setEditingVipTitleIndex(null);
+                        setVipTitleFormText('');
+                      }} 
+                      className="space-y-4"
+                    >
+                      <div>
+                        <label className="text-[10px] text-gray-400 font-mono block mb-1">Elite Title Name *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. 🛸 Galactic Emperor"
+                          value={vipTitleFormText}
+                          onChange={(e) => setVipTitleFormText(e.target.value)}
+                          className="w-full bg-black/60 border border-white/10 focus:border-red-500 focus:outline-none rounded-xl px-4 py-3 text-xs text-white"
+                        />
+                      </div>
+
+                      <div className="flex gap-2">
+                        {editingVipTitleIndex !== null && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingVipTitleIndex(null);
+                              setVipTitleFormText('');
+                            }}
+                            className="bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border border-white/5 px-4 rounded-xl text-xs font-mono font-bold uppercase transition-all py-3 flex-1 text-center cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                        <button
+                          type="submit"
+                          className="bg-red-650 hover:bg-red-500 text-white font-mono font-bold text-xs py-3 rounded-xl uppercase tracking-wider shadow-lg shadow-red-650/10 transition-all flex items-center justify-center gap-1.5 flex-1 cursor-pointer"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>{editingVipTitleIndex !== null ? 'Apply Changes' : 'Register Title'}</span>
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* Right Side list */}
+                  <div className="lg:col-span-7 bg-[#0f0f12] border border-white/5 p-6 rounded-3xl space-y-4">
+                    <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                      <span className="text-xs font-mono text-gray-400 uppercase tracking-wider">Registered VIP Elite Badges</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          showConfirm(
+                            "Restore Default VIP Titles",
+                            "Are you sure you want to restore default VIP titles? This will overwrite your custom modifications.",
+                            async () => {
+                              const defaultTitles = [
+                                '🍿 Popcorn Binger',
+                                '👑 Cinema Monarch',
+                                '⚡ Neon Overlord',
+                                '💎 Galactic Critic',
+                                '🌟 Showbiz Legend',
+                                '🔥 Screen Warrior'
+                              ];
+                              const nextSettings = { ...settings!, vipTiers: defaultTitles };
+                              setSettings(nextSettings);
+                              await updateAppSettings(nextSettings);
+                              triggerAlert("Default Elite VIP Titles restored successfully!");
+                            }
+                          );
+                        }}
+                        className="text-[9px] text-gray-400 hover:text-red-400 font-mono flex items-center gap-1 uppercase transition-all cursor-pointer"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>Reset List</span>
+                      </button>
+                    </div>
+
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1 animate-fade-in">
+                      {(() => {
+                        const defaultTitles = [
+                          '🍿 Popcorn Binger',
+                          '👑 Cinema Monarch',
+                          '⚡ Neon Overlord',
+                          '💎 Galactic Critic',
+                          '🌟 Showbiz Legend',
+                          '🔥 Screen Warrior'
+                        ];
+                        const list = settings?.vipTiers && settings.vipTiers.length > 0 ? settings.vipTiers : defaultTitles;
+
+                        return list.map((title, idx) => (
+                          <div 
+                            key={idx}
+                            className="bg-black/30 border border-white/5 rounded-xl p-3 flex justify-between items-center hover:scale-[1.005] transition-all"
+                          >
+                            <div className="flex items-center space-x-3">
+                              <span className="text-xs font-mono text-gray-600 bg-white/5 w-6 h-6 flex items-center justify-center rounded-lg">
+                                #{idx + 1}
+                              </span>
+                              <span className="text-xs font-bold text-white px-2.5 py-1 rounded bg-yellow-500/10 border border-yellow-500/10 text-yellow-500 flex items-center gap-1.5 shadow-sm">
+                                <Trophy className="w-3 h-3" />
+                                <span>{title}</span>
+                              </span>
+                            </div>
+
+                            <div className="flex space-x-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingVipTitleIndex(idx);
+                                  setVipTitleFormText(title);
+                                }}
+                                className="p-2 text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition-all cursor-pointer"
+                                title="Edit Title"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  showConfirm(
+                                    "Delete Elite Title",
+                                    `Are you sure you want to delete the title "${title}"?`,
+                                    async () => {
+                                      const nextList = list.filter((_, i) => i !== idx);
+                                      const nextSettings = { ...settings!, vipTiers: nextList };
+                                      setSettings(nextSettings);
+                                      await updateAppSettings(nextSettings);
+                                      triggerAlert("Elite title deleted successfully.");
+                                    }
+                                  );
+                                }}
+                                className="p-2 text-red-500 hover:text-red-400 bg-red-500/5 hover:bg-red-500/15 rounded-lg transition-all cursor-pointer"
+                                title="Delete Title"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          );
+        })()}
+
+        {/* 14. USER FEEDBACK MANAGEMENT PANEL */}
+        {activeTab === 'feedback' && (() => {
+          const filteredFeedback = feedbackList.filter(item => {
+            const matchesType = feedbackTypeFilter === 'all' || item.type === feedbackTypeFilter;
+            const matchesStatus = feedbackStatusFilter === 'all' || item.status === feedbackStatusFilter;
+            const query = feedbackSearchQuery.toLowerCase().trim();
+            const matchesSearch = !query || 
+              (item.userName || '').toLowerCase().includes(query) ||
+              (item.userEmail || '').toLowerCase().includes(query) ||
+              (item.message || '').toLowerCase().includes(query);
+            return matchesType && matchesStatus && matchesSearch;
+          });
+
+          return (
+            <div className="space-y-6">
+              {/* Filter controls */}
+              <div className="bg-[#0f0f12] border border-white/5 p-6 rounded-2xl space-y-4">
+                <div className="flex flex-col lg:flex-row gap-4 justify-between">
+                  <div className="flex flex-wrap gap-4 items-center">
+                    {/* Type Filter */}
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] text-gray-500 font-mono uppercase tracking-wider block">Feedback Type</span>
+                      <div className="flex bg-black/40 p-1 rounded-xl border border-white/5">
+                        {(['all', 'suggestion', 'bug', 'other'] as const).map(type => (
+                          <button
+                            key={type}
+                            type="button"
+                            onClick={() => setFeedbackTypeFilter(type)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-mono uppercase transition-all cursor-pointer ${
+                              feedbackTypeFilter === type
+                                ? 'bg-red-650 text-white font-bold'
+                                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            {type}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Status Filter */}
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] text-gray-500 font-mono uppercase tracking-wider block">Review Status</span>
+                      <div className="flex bg-black/40 p-1 rounded-xl border border-white/5">
+                        {(['all', 'pending', 'reviewed', 'resolved'] as const).map(status => (
+                          <button
+                            key={status}
+                            type="button"
+                            onClick={() => setFeedbackStatusFilter(status)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-mono uppercase transition-all cursor-pointer ${
+                              feedbackStatusFilter === status
+                                ? 'bg-red-650 text-white font-bold'
+                                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            {status}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Search Query */}
+                  <div className="space-y-1.5 w-full lg:w-72">
+                    <span className="text-[10px] text-gray-500 font-mono uppercase tracking-wider block">Search Message or User</span>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                      <input
+                        type="text"
+                        placeholder="Search feedback content..."
+                        value={feedbackSearchQuery}
+                        onChange={(e) => setFeedbackSearchQuery(e.target.value)}
+                        className="w-full bg-black/40 border border-white/5 focus:border-red-500/50 focus:outline-none rounded-xl pl-9 pr-4 py-2.5 text-xs text-white placeholder-gray-500 font-sans transition-all"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Feedback list */}
+              <div className="bg-[#0f0f12] border border-white/5 rounded-2xl overflow-hidden">
+                <div className="p-4 border-b border-white/5 bg-black/20 flex justify-between items-center">
+                  <span className="text-xs font-mono text-gray-400 uppercase tracking-widest">
+                    Feedback Submissions ({filteredFeedback.length} items found)
+                  </span>
+                </div>
+
+                <div className="divide-y divide-white/5">
+                  {filteredFeedback.length === 0 ? (
+                    <div className="text-center py-16 text-gray-500 space-y-2">
+                      <MessageCircle className="w-8 h-8 text-neutral-800 mx-auto" />
+                      <p className="text-xs font-mono">No matching user feedback found on system.</p>
+                    </div>
+                  ) : (
+                    filteredFeedback.map((item) => {
+                      const typeColors = {
+                        suggestion: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
+                        bug: 'bg-red-500/10 text-red-400 border-red-500/20',
+                        other: 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                      };
+
+                      const statusColors = {
+                        pending: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
+                        reviewed: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+                        resolved: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                      };
+
+                      return (
+                        <div key={item.id} className="p-6 space-y-4 hover:bg-white/[0.01] transition-all">
+                          {/* Header row */}
+                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/15 flex items-center justify-center text-sm font-bold text-gray-300">
+                                {(item.userName || item.userEmail || '?')[0].toUpperCase()}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-white">{item.userName || 'Anonymous'}</span>
+                                  <span className="text-[10px] font-mono text-gray-500">ID: {item.userId}</span>
+                                </div>
+                                <p className="text-[11px] text-gray-400 font-mono">{item.userEmail}</p>
+                              </div>
+                            </div>
+
+                            {/* Badges & date */}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`px-2.5 py-1 text-[9px] font-mono font-bold uppercase rounded-lg border tracking-wider ${typeColors[item.type]}`}>
+                                {item.type}
+                              </span>
+                              <span className={`px-2.5 py-1 text-[9px] font-mono font-bold uppercase rounded-lg border tracking-wider ${statusColors[item.status]}`}>
+                                {item.status}
+                              </span>
+                              <span className="text-[10px] font-mono text-gray-500">
+                                {new Date(item.timestamp).toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Message box */}
+                          <div className="bg-black/30 border border-white/5 p-4 rounded-xl text-xs text-gray-300 leading-relaxed font-sans whitespace-pre-wrap">
+                            {item.message}
+                          </div>
+
+                          {/* Action row */}
+                          <div className="flex items-center justify-end gap-2 pt-1 border-t border-white/[0.02]">
+                            <div className="flex items-center gap-1.5">
+                              {item.status !== 'pending' && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await updateFeedbackStatus(item.id, 'pending');
+                                      triggerAlert("Feedback status updated to Pending.");
+                                    } catch (err) {
+                                      triggerAlert("Failed to update status.");
+                                    }
+                                  }}
+                                  className="px-2.5 py-1.5 bg-white/5 hover:bg-white/10 text-gray-300 text-[10px] font-mono uppercase rounded-lg transition-all cursor-pointer border border-white/5"
+                                >
+                                  Mark Pending
+                                </button>
+                              )}
+                              {item.status !== 'reviewed' && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await updateFeedbackStatus(item.id, 'reviewed');
+                                      triggerAlert("Feedback status updated to Reviewed.");
+                                    } catch (err) {
+                                      triggerAlert("Failed to update status.");
+                                    }
+                                  }}
+                                  className="px-2.5 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 text-[10px] font-mono uppercase rounded-lg transition-all cursor-pointer border border-purple-500/10"
+                                >
+                                  Mark Reviewed
+                                </button>
+                              )}
+                              {item.status !== 'resolved' && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await updateFeedbackStatus(item.id, 'resolved');
+                                      triggerAlert("Feedback status updated to Resolved.");
+                                    } catch (err) {
+                                      triggerAlert("Failed to update status.");
+                                    }
+                                  }}
+                                  className="px-2.5 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-[10px] font-mono uppercase rounded-lg transition-all cursor-pointer border border-emerald-500/10"
+                                >
+                                  Mark Resolved
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  showConfirm(
+                                    "Delete Feedback Item",
+                                    "Are you sure you want to permanently delete this feedback submission from Firestore?",
+                                    async () => {
+                                      try {
+                                        await deleteFeedback(item.id);
+                                        triggerAlert("Feedback deleted successfully from database.");
+                                      } catch (err) {
+                                        triggerAlert("Failed to delete feedback.");
+                                      }
+                                    }
+                                  );
+                                }}
+                                className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-all cursor-pointer border border-red-500/10"
+                                title="Delete Feedback"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
       </div>
 
